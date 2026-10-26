@@ -1,6 +1,6 @@
 # kate-sbox
 
-Use [Kate](https://kate-editor.org) as your [s&box](https://sbox.game) code editor, with real C# IntelliSense and a warm dark theme.
+Use [Kate](https://kate-editor.org) as your [s&box](https://sbox.game) code editor, with real C# IntelliSense and Cate Pro theme.
 
 - **C# IntelliSense** from the Roslyn language server, the same engine VS Code's C# Dev Kit runs on: completion, hover docs, go to definition (into decompiled engine code too), errors and warnings, semantic highlighting, inlay hints, rename, code actions and formatting. It loads the `.slnx` s&box generates, including the engine's editor projects.
 - **Kate in s&box**: a **Kate** entry under *Edit › Preferences › Code Editor*, so double-clicking a component or a compile error opens Kate at the right line.
