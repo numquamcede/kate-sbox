@@ -14,23 +14,38 @@ Only the s&box file goes upstream. The language server bridge, theme and highlig
 
 **Title:** Add Kate as a built-in code editor
 
-**What can't you do?**
+The body, in the form's sections:
 
-Kate (KDE's editor, on Windows, Linux and macOS) isn't in the Code Editor list. The Custom option can launch it, but
-can't do it well: Kate opens a new window for every folder argument, so opening a file should only pass the project
-folder when Kate isn't already running, and a fixed argument template can't express that.
+```markdown
+### What can't you do?
 
-**How would you like it to work?**
+Kate isn't one of the built-in code editors. It can be set up through **Custom**, but every user has to find the executable and work out the argument templates themselves:
 
-A Kate entry alongside Visual Studio Code, Visual Studio and Rider, found automatically (PATH, the winget/installer
-locations on Windows, the app bundle on macOS, distro and Flatpak paths on Linux). Opening a file uses Kate's
-`file:line:column` form, which works both when starting Kate and when handing the file to a running instance.
+- To jump to a line in an already running Kate, it needs `{file}:{line}:{column}`; `--line`/`--column` are dropped when Kate hands the file to the open window.
+- Open Solution needs `{project_root}`, since the default `{solution}` opens the `.slnx` as a text file.
 
-**What have you tried?**
+Custom also can't pass the project folder only when Kate isn't running yet. Any folder argument makes Kate open a new window, so a fixed template either never shows the project in Kate's project view, or opens a new window on every click.
 
-The Custom code editor, and a local `ICodeEditor` implementation, which is what the PR would contain. With Kate's LSP
-client pointed at the Roslyn language server it gives completion, diagnostics and go to definition against the
-generated `.slnx`.
+### How would you like it to work?
+
+A **Kate** entry in Preferences › Code Editor, next to Visual Studio Code, Visual Studio and Rider:
+
+- Found automatically: `kate` on PATH, `%LOCALAPPDATA%/Programs/Kate` (winget/installer default) and `%ProgramFiles%/Kate` on Windows, the app bundle on macOS, `/usr/bin/kate`, Flatpak and Snap on Linux.
+- Opening a file passes `"path:line:column"`. If Kate isn't running, it also passes the project folder, so Kate opens with the project in its project view.
+- Open Solution / Open Addon open the project folder, like the VS Code editor does.
+
+### What have you tried?
+
+The Custom editor, with the templates above. It works once set up, but it isn't discoverable and can't handle the running/not running case.
+
+I've also written it as an `ICodeEditor` next to the existing ones: one file, same shape as `CodeEditor.VSCode.cs`, using `CodeEditorLocator`. I've been using it with s&box 26.10.13c and Kate 26.08 on Windows 11. It shows up in the Code Editor dropdown and opens files at the right line and column, both when Kate is already running and when it isn't. Happy to open a PR if this is wanted.
+
+### Additional context
+
+Related: #504 and #10481 (configurable editors), which the Custom editor now covers. This would be a dedicated entry for one more editor.
+
+For C#, Kate's LSP client can run the Roslyn language server against the `.slnx` s&box generates (completion, diagnostics, go to definition). I've put that setup in https://github.com/numquamcede/kate-sbox; it's separate from this request.
+```
 
 ## 2. Pull request
 
@@ -54,6 +69,7 @@ Fixes: #<issue number>
 - One new file, `CodeEditors/CodeEditor.Kate.cs`, in the same shape as the VS Code editor and using `CodeEditorLocator` for lookup and launching.
 - Files open as `"path:line:column"`. Kate parses this (1-based) both on startup and when it hands the file to an already running instance, whereas `--line`/`--column` are dropped on the way to a running instance.
 - Any folder argument makes Kate start a new window, so `OpenFile` only passes the project folder (for Kate's project view) when no Kate is running; otherwise it hands just the file to the open window.
+- `FindSolutionFromPath` throws when the file isn't under a solution (e.g. engine code); that's caught, as the Custom editor does, and just the file is opened.
 - `OpenSolution`/`OpenAddon` open the project folder, like the VS Code editor.
 - Lookup: `kate` on PATH, `%LOCALAPPDATA%/Programs/Kate` (winget/installer default), `%ProgramFiles%/Kate`, the macOS app bundle, `/usr/bin/kate`, Flatpak exports and Snap.
 
@@ -77,3 +93,4 @@ On Windows 11 with Kate 26.08.2 and s&box 26.10.13c:
 - Kate appears in the Code Editor dropdown and is reported as installed.
 - With Kate running, opening a project file at line 120, column 16 opened it as a new tab in the running window at that position.
 - With Kate closed, opening a project file at line 50, column 6 started Kate with the project folder in its project view and the file at that position.
+- With Kate closed, opening engine code that isn't under a solution (`addons/tools/Code/CreateAsset.cs`, line 40) through `CodeEditor.OpenFile` started Kate with the file at line 40.

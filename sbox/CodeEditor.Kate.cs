@@ -14,7 +14,17 @@ public class Kate : ICodeEditor
 
 		// A folder argument always starts a new Kate window, so only bring the project along
 		// when there's no Kate open to hand the file to.
-		var sln = IsRunning() ? null : CodeEditor.FindSolutionFromPath( Path.GetDirectoryName( path ) );
+		string sln = null;
+		if ( !IsRunning() )
+		{
+			// Throws when the file isn't under a solution, e.g. engine code; then just open the file
+			try
+			{
+				sln = CodeEditor.FindSolutionFromPath( Path.GetDirectoryName( path ) );
+			}
+			catch { }
+		}
+
 		if ( sln is null )
 		{
 			Launch( file );
