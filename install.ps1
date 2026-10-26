@@ -15,6 +15,19 @@ $root = $PSScriptRoot
 $data = $env:LOCALAPPDATA
 $tools = "$data\kate-sbox"
 
+# Some packaged apps (their terminals and the tools they run) keep AppData writes in their own folder
+# under Packages, where Kate never looks: the install would look fine from here and do nothing for Kate
+$probe = "kate-sbox-probe-$PID.tmp"
+Set-Content "$data\$probe" ''
+$redirected = Get-ChildItem "$data\Packages" -Directory -ErrorAction SilentlyContinue |
+	Where-Object { Test-Path "$( $_.FullName )\LocalCache\Local\$probe" } | Select-Object -First 1
+Remove-Item "$data\$probe" -Force
+if ( $redirected )
+{
+	Write-Error "AppData writes from this PowerShell are redirected into the $( $redirected.Name ) app's folder, where Kate won't find them. Run install.ps1 from a normal PowerShell window (Start menu > Windows PowerShell)."
+	return
+}
+
 if ( Get-Process kate -ErrorAction SilentlyContinue )
 {
 	Write-Error "Close Kate first; it overwrites its settings when it exits."

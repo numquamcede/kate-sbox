@@ -57,6 +57,7 @@ It also ties the server's lifetime to its own, so restarting the server in Kate 
 
 ## Troubleshooting
 
+- **"AppData writes from this PowerShell are redirected"**: the PowerShell you ran the installer from belongs to a packaged app that keeps AppData changes in its own folder, so Kate would never see them. Run it again from Windows PowerShell opened from the Start menu. This is also why an older install can leave Kate with its default theme and no C#.
 - **No IntelliSense**: check *Output › LSP Client* in Kate and `%LOCALAPPDATA%\kate-sbox\logs\roslyn-kate.log`. *LSP Client › Restart All LSP Servers* restarts it.
 - **"No solution next to …sbproj"**: open the project in the s&box editor once; it generates the `.slnx` and `.csproj` files.
 - **Kate missing from s&box's code editors**: rerun `install.ps1` (an s&box update can remove it), then restart the s&box editor.
