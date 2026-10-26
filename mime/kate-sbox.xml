@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- File types s&box projects use that the standard MIME database doesn't know, so they get their own icons. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-razor">
+    <comment>Razor component</comment>
+    <sub-class-of type="text/plain"/>
+    <icon name="text-x-razor"/>
+    <glob pattern="*.razor"/>
+    <glob pattern="*.cshtml"/>
+  </mime-type>
+  <mime-type type="text/x-hlsl">
+    <comment>HLSL shader</comment>
+    <sub-class-of type="text/plain"/>
+    <icon name="text-x-hlsl"/>
+    <glob pattern="*.shader"/>
+    <glob pattern="*.hlsl"/>
+    <glob pattern="*.hlsli"/>
+    <glob pattern="*.fxc"/>
+    <glob pattern="*.slang"/>
+  </mime-type>
+  <mime-type type="application/x-msbuild-project">
+    <comment>MSBuild project</comment>
+    <sub-class-of type="application/xml"/>
+    <icon name="application-x-msbuild-project"/>
+    <glob pattern="*.csproj"/>
+    <glob pattern="*.props"/>
+    <glob pattern="*.targets"/>
+  </mime-type>
+  <mime-type type="application/x-ms-solution">
+    <comment>Visual Studio solution</comment>
+    <sub-class-of type="text/plain"/>
+    <icon name="application-x-ms-solution"/>
+    <glob pattern="*.sln"/>
+    <glob pattern="*.slnx"/>
+  </mime-type>
+  <mime-type type="application/x-sbox-project">
+    <comment>s&amp;box project</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="application-x-sbox-project"/>
+    <glob pattern="*.sbproj"/>
+  </mime-type>
+  <mime-type type="application/x-sbox-scene">
+    <comment>s&amp;box scene</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="application-x-sbox-scene"/>
+    <glob pattern="*.scene"/>
+  </mime-type>
+  <mime-type type="application/x-sbox-prefab">
+    <comment>s&amp;box prefab</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="application-x-sbox-prefab"/>
+    <glob pattern="*.prefab"/>
+  </mime-type>
+</mime-info>

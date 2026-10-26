@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language>
+<!--
+  Razor components (.razor), as s&box uses them for UI: HTML markup with @directives, @code blocks,
+  @if/@foreach statements and @expressions. Markup comes from Kate's HTML definition and code from its C# one.
+  Razor inside attribute values (class="@x") is left to HTML.
+-->
+<language name="Razor" section="Markup" version="1" kateversion="5.79"
+          extensions="*.razor;*.cshtml" mimetype="text/x-razor" indenter="xml" author="kate-sbox" license="MIT">
+  <highlighting>
+    <contexts>
+      <context name="Markup" attribute="Normal Text" lineEndContext="#stay">
+        <Detect2Chars attribute="Comment" context="RazorComment" char="@" char1="*" beginRegion="RazorComment"/>
+        <Detect2Chars attribute="Normal Text" char="@" char1="@"/>
+        <RegExpr attribute="Directive" context="DirectiveLine" String="@(?:using(?!\s*\()|inherits|namespace|attribute|implements|inject|page|layout|typeparam|preservewhitespace|rendermode|model|addTagHelper)\b"/>
+        <RegExpr attribute="Directive" context="BlockDirective" String="@(?:code|functions)\b"/>
+        <Detect2Chars attribute="Transition" context="CSharpBlock" char="@" char1="{" beginRegion="CodeBlock"/>
+        <Detect2Chars attribute="Transition" context="CSharpParen" char="@" char1="("/>
+        <RegExpr attribute="Control" context="StatementHead" String="@(?:if|foreach|for|while|switch|lock|using|do|try)\b"/>
+        <RegExpr attribute="Control" context="StatementHead" String="^\s*(?:\}\s*)?(?:else\s+if|else|catch|finally)\b"/>
+        <RegExpr attribute="Transition" context="ImplicitExpr" String="(?&lt;![A-Za-z0-9_])@(?=[A-Za-z_])"/>
+        <IncludeRules context="FindHTML##HTML"/>
+      </context>
+
+      <!-- @using X; @inherits Y ... : C# to the end of the line -->
+      <context name="DirectiveLine" attribute="Normal Text" lineEndContext="#pop">
+        <IncludeRules context="##C#"/>
+      </context>
+
+      <!-- @code, then the opening brace (possibly on the next line) -->
+      <context name="BlockDirective" attribute="Normal Text" lineEndContext="#stay" fallthroughContext="#pop">
+        <DetectSpaces/>
+        <DetectChar attribute="Transition" context="#pop!CSharpBlock" char="{" beginRegion="CodeBlock"/>
+      </context>
+
+      <!-- Inside @code { } or @{ }: C# until the matching brace -->
+      <context name="CSharpBlock" attribute="Normal Text" lineEndContext="#stay">
+        <DetectChar attribute="Symbol" context="CSharpBlockNested" char="{" beginRegion="Brace"/>
+        <DetectChar attribute="Transition" context="#pop" char="}" endRegion="CodeBlock"/>
+        <IncludeRules context="##C#"/>
+      </context>
+      <context name="CSharpBlockNested" attribute="Normal Text" lineEndContext="#stay">
+        <DetectChar attribute="Symbol" context="CSharpBlockNested" char="{" beginRegion="Brace"/>
+        <DetectChar attribute="Symbol" context="#pop" char="}" endRegion="Brace"/>
+        <IncludeRules context="##C#"/>
+      </context>
+
+      <!-- @( ... ) and call arguments: C# until the matching parenthesis -->
+      <context name="CSharpParen" attribute="Normal Text" lineEndContext="#stay">
+        <DetectChar attribute="Symbol" context="CSharpParen" char="("/>
+        <DetectChar attribute="Symbol" context="#pop" char=")"/>
+        <IncludeRules context="##C#"/>
+      </context>
+
+      <!-- @if ( ... ) : C# up to the block's brace, whose contents are markup again -->
+      <context name="StatementHead" attribute="Normal Text" lineEndContext="#pop">
+        <DetectChar attribute="Symbol" context="#pop" char="{"/>
+        <IncludeRules context="##C#"/>
+      </context>
+
+      <!-- @Name, @Player.Health, @Format( x ) -->
+      <context name="ImplicitExpr" attribute="Expression" lineEndContext="#pop" fallthroughContext="#pop">
+        <RegExpr attribute="Expression" context="#pop!ImplicitTail" String="[A-Za-z_][A-Za-z0-9_]*(?:(?:\?\.|\.)[A-Za-z_][A-Za-z0-9_]*)*"/>
+      </context>
+      <context name="ImplicitTail" attribute="Expression" lineEndContext="#pop" fallthroughContext="#pop">
+        <DetectChar attribute="Symbol" context="#pop!CSharpParen" char="("/>
+      </context>
+
+      <context name="RazorComment" attribute="Comment" lineEndContext="#stay">
+        <Detect2Chars attribute="Comment" context="#pop" char="*" char1="@" endRegion="RazorComment"/>
+        <DetectSpaces/>
+        <IncludeRules context="##Comments"/>
+      </context>
+    </contexts>
+
+    <itemDatas>
+      <itemData name="Normal Text" defStyleNum="dsNormal"/>
+      <itemData name="Transition"  defStyleNum="dsPreprocessor"/>
+      <itemData name="Directive"   defStyleNum="dsKeyword"/>
+      <itemData name="Control"     defStyleNum="dsControlFlow"/>
+      <itemData name="Expression"  defStyleNum="dsVariable"/>
+      <itemData name="Symbol"      defStyleNum="dsNormal"/>
+      <itemData name="Comment"     defStyleNum="dsComment"/>
+    </itemDatas>
+  </highlighting>
+  <general>
+    <comments>
+      <comment name="multiLine" start="@*" end="*@" region="RazorComment"/>
+    </comments>
+  </general>
+</language>

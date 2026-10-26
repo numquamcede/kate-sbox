@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language>
+<!--
+  HLSL, including the block layout s&box shaders use (HEADER, FEATURES, MODES, COMMON, VS, PS, CS ...)
+  and their annotations (Attribute, Default3, UiGroup ...).
+-->
+<language name="HLSL" alternativeNames="s&amp;box Shader;Slang" section="Sources" version="1" kateversion="5.79"
+          extensions="*.shader;*.hlsl;*.hlsli;*.fxc;*.fx;*.fxh;*.slang" mimetype="text/x-hlsl"
+          indenter="cstyle" style="C++" author="kate-sbox" license="MIT">
+  <highlighting>
+    <list name="sections">
+      <item>HEADER</item><item>FEATURES</item><item>MODES</item><item>COMMON</item>
+      <item>VS</item><item>PS</item><item>GS</item><item>HS</item><item>DS</item><item>CS</item><item>RTX</item>
+    </list>
+    <list name="controlflow">
+      <item>if</item><item>else</item><item>for</item><item>while</item><item>do</item><item>switch</item>
+      <item>case</item><item>default</item><item>break</item><item>continue</item><item>return</item><item>discard</item>
+    </list>
+    <list name="keywords">
+      <item>struct</item><item>cbuffer</item><item>tbuffer</item><item>typedef</item><item>register</item><item>packoffset</item>
+      <item>technique</item><item>technique10</item><item>technique11</item><item>pass</item><item>compile</item><item>sampler_state</item>
+      <item>class</item><item>interface</item><item>namespace</item><item>using</item><item>template</item><item>typename</item>
+      <item>sizeof</item><item>true</item><item>false</item><item>NULL</item>
+    </list>
+    <list name="modifiers">
+      <item>in</item><item>out</item><item>inout</item><item>uniform</item><item>static</item><item>const</item><item>extern</item>
+      <item>nointerpolation</item><item>linear</item><item>centroid</item><item>noperspective</item><item>sample</item>
+      <item>groupshared</item><item>precise</item><item>row_major</item><item>column_major</item><item>volatile</item>
+      <item>shared</item><item>snorm</item><item>unorm</item><item>inline</item><item>export</item><item>globallycoherent</item>
+      <item>point</item><item>line</item><item>triangle</item><item>lineadj</item><item>triangleadj</item>
+    </list>
+    <list name="types">
+      <item>void</item><item>bool</item><item>int</item><item>uint</item><item>dword</item><item>half</item><item>float</item>
+      <item>double</item><item>min16float</item><item>min10float</item><item>min16int</item><item>min12int</item><item>min16uint</item>
+      <item>int16_t</item><item>uint16_t</item><item>int64_t</item><item>uint64_t</item><item>float16_t</item><item>float32_t</item>
+      <item>matrix</item><item>vector</item><item>string</item>
+      <item>Texture1D</item><item>Texture1DArray</item><item>Texture2D</item><item>Texture2DArray</item><item>Texture2DMS</item>
+      <item>Texture2DMSArray</item><item>Texture3D</item><item>TextureCube</item><item>TextureCubeArray</item>
+      <item>RWTexture1D</item><item>RWTexture1DArray</item><item>RWTexture2D</item><item>RWTexture2DArray</item><item>RWTexture3D</item>
+      <item>Buffer</item><item>RWBuffer</item><item>ByteAddressBuffer</item><item>RWByteAddressBuffer</item>
+      <item>StructuredBuffer</item><item>RWStructuredBuffer</item><item>AppendStructuredBuffer</item><item>ConsumeStructuredBuffer</item>
+      <item>ConstantBuffer</item><item>SamplerState</item><item>SamplerComparisonState</item><item>sampler</item>
+      <item>sampler1D</item><item>sampler2D</item><item>sampler3D</item><item>samplerCUBE</item>
+      <item>RaytracingAccelerationStructure</item><item>RayDesc</item><item>RayQuery</item>
+      <item>InputPatch</item><item>OutputPatch</item><item>PointStream</item><item>LineStream</item><item>TriangleStream</item>
+    </list>
+    <list name="intrinsics">
+      <item>abs</item><item>acos</item><item>all</item><item>any</item><item>asin</item><item>atan</item><item>atan2</item>
+      <item>asfloat</item><item>asint</item><item>asuint</item><item>asdouble</item><item>ceil</item><item>clamp</item><item>clip</item>
+      <item>cos</item><item>cosh</item><item>countbits</item><item>cross</item><item>ddx</item><item>ddy</item><item>ddx_coarse</item>
+      <item>ddy_coarse</item><item>ddx_fine</item><item>ddy_fine</item><item>degrees</item><item>determinant</item><item>distance</item>
+      <item>dot</item><item>exp</item><item>exp2</item><item>f16tof32</item><item>f32tof16</item><item>faceforward</item>
+      <item>firstbithigh</item><item>firstbitlow</item><item>floor</item><item>fma</item><item>fmod</item><item>frac</item>
+      <item>frexp</item><item>fwidth</item><item>isfinite</item><item>isinf</item><item>isnan</item><item>ldexp</item><item>length</item>
+      <item>lerp</item><item>lit</item><item>log</item><item>log10</item><item>log2</item><item>mad</item><item>max</item><item>min</item>
+      <item>modf</item><item>mul</item><item>noise</item><item>normalize</item><item>pow</item><item>radians</item><item>rcp</item>
+      <item>reflect</item><item>refract</item><item>reversebits</item><item>round</item><item>rsqrt</item><item>saturate</item>
+      <item>sign</item><item>sin</item><item>sincos</item><item>sinh</item><item>smoothstep</item><item>sqrt</item><item>step</item>
+      <item>tan</item><item>tanh</item><item>transpose</item><item>trunc</item>
+      <item>tex2D</item><item>tex2Dlod</item><item>tex2Dbias</item><item>tex2Dgrad</item><item>tex3D</item><item>texCUBE</item>
+      <item>Sample</item><item>SampleLevel</item><item>SampleBias</item><item>SampleGrad</item><item>SampleCmp</item>
+      <item>SampleCmpLevelZero</item><item>Load</item><item>Store</item><item>Gather</item><item>GatherRed</item><item>GatherGreen</item>
+      <item>GatherBlue</item><item>GatherAlpha</item><item>GetDimensions</item><item>Append</item><item>RestartStrip</item>
+      <item>InterlockedAdd</item><item>InterlockedMin</item><item>InterlockedMax</item><item>InterlockedOr</item><item>InterlockedAnd</item>
+      <item>InterlockedXor</item><item>InterlockedExchange</item><item>InterlockedCompareExchange</item><item>InterlockedCompareStore</item>
+      <item>GroupMemoryBarrier</item><item>GroupMemoryBarrierWithGroupSync</item><item>AllMemoryBarrier</item>
+      <item>AllMemoryBarrierWithGroupSync</item><item>DeviceMemoryBarrier</item><item>DeviceMemoryBarrierWithGroupSync</item>
+      <item>WaveActiveSum</item><item>WaveActiveProduct</item><item>WaveActiveMin</item><item>WaveActiveMax</item>
+      <item>WaveActiveAllTrue</item><item>WaveActiveAnyTrue</item><item>WaveActiveBallot</item><item>WaveReadLaneAt</item>
+      <item>WaveReadLaneFirst</item><item>WaveGetLaneIndex</item><item>WaveGetLaneCount</item><item>WaveIsFirstLane</item>
+      <item>TraceRay</item><item>ReportHit</item><item>IgnoreHit</item><item>AcceptHitAndEndSearch</item>
+    </list>
+    <list name="annotations">
+      <item>Attribute</item><item>Default</item><item>Default1</item><item>Default2</item><item>Default3</item><item>Default4</item>
+      <item>Range</item><item>Range1</item><item>Range2</item><item>Range3</item><item>Range4</item>
+      <item>UiType</item><item>UiGroup</item><item>UiStep</item><item>Expression</item><item>SrgbRead</item><item>Srgb</item>
+      <item>OutputFormat</item><item>InputFormat</item><item>ColorSpace</item><item>Channel</item><item>AddressU</item>
+      <item>AddressV</item><item>AddressW</item><item>Filter</item><item>MaxAniso</item><item>BorderColor</item>
+      <item>Feature</item><item>FeatureRule</item><item>Allow1</item><item>Requires1</item><item>AttributeLookup</item>
+      <item>numthreads</item><item>unroll</item><item>loop</item><item>branch</item><item>flatten</item><item>fastopt</item>
+      <item>allow_uav_condition</item><item>earlydepthstencil</item><item>domain</item><item>partitioning</item>
+      <item>outputtopology</item><item>outputcontrolpoints</item><item>patchconstantfunc</item><item>maxvertexcount</item>
+      <item>maxtessfactor</item><item>instance</item><item>forcecase</item><item>call</item><item>WaveSize</item>
+    </list>
+
+    <contexts>
+      <context name="Normal" attribute="Normal Text" lineEndContext="#stay">
+        <DetectSpaces/>
+        <Detect2Chars attribute="Comment" context="Comment" char="/" char1="/"/>
+        <Detect2Chars attribute="Comment" context="MultiComment" char="/" char1="*" beginRegion="Comment"/>
+        <DetectChar attribute="Preprocessor" context="Preprocessor" char="#" firstNonSpace="true"/>
+        <DetectChar attribute="String" context="String" char="&quot;"/>
+
+        <keyword attribute="Section" String="sections"/>
+        <keyword attribute="Control Flow" String="controlflow"/>
+        <keyword attribute="Keyword" String="keywords"/>
+        <keyword attribute="Modifier" String="modifiers"/>
+        <keyword attribute="Data Type" String="types"/>
+        <RegExpr attribute="Data Type" String="\b(?:bool|int|uint|dword|half|float|double|min16float|min10float|min16int|min12int|min16uint|float16_t|int16_t|uint16_t|int64_t|uint64_t)[1-4](?:x[1-4])?\b"/>
+        <keyword attribute="Intrinsic" String="intrinsics"/>
+        <keyword attribute="Annotation" String="annotations"/>
+        <RegExpr attribute="Semantic" String="\bSV_[A-Za-z]+[0-9]*\b"/>
+        <RegExpr attribute="Semantic" String="(?&lt;=:|:\s|:\s\s)(?:POSITION|NORMAL|TANGENT|BINORMAL|TEXCOORD|COLOR|BLENDWEIGHT|BLENDINDICES|PSIZE|FOG|DEPTH|VFACE|VPOS)[0-9]*\b"/>
+        <RegExpr attribute="Function" String="\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()"/>
+
+        <Float attribute="Float" context="Float Suffixes"/>
+        <HlCHex attribute="Hex" context="Int Suffixes"/>
+        <Int attribute="Decimal" context="Int Suffixes"/>
+
+        <DetectChar attribute="Punctuation" char="{" beginRegion="Brace"/>
+        <DetectChar attribute="Punctuation" char="}" endRegion="Brace"/>
+        <AnyChar attribute="Punctuation" String="()[];,."/>
+        <AnyChar attribute="Operator" String="+-*/%=&lt;&gt;!&amp;|^~?:"/>
+        <DetectIdentifier/>
+      </context>
+
+      <context name="Float Suffixes" attribute="Float" lineEndContext="#pop" fallthroughContext="#pop">
+        <AnyChar attribute="Float" String="fFhHlL" context="#pop"/>
+      </context>
+      <context name="Int Suffixes" attribute="Decimal" lineEndContext="#pop" fallthroughContext="#pop">
+        <StringDetect attribute="Decimal" String="ul" insensitive="true" context="#pop"/>
+        <AnyChar attribute="Decimal" String="uUlL" context="#pop"/>
+      </context>
+
+      <context name="String" attribute="String" lineEndContext="#pop">
+        <LineContinue attribute="String"/>
+        <HlCStringChar attribute="String Char"/>
+        <DetectChar attribute="String" context="#pop" char="&quot;"/>
+      </context>
+
+      <context name="Comment" attribute="Comment" lineEndContext="#pop">
+        <LineContinue attribute="Comment"/>
+        <DetectSpaces/>
+        <IncludeRules context="##Comments"/>
+      </context>
+      <context name="MultiComment" attribute="Comment" lineEndContext="#stay">
+        <Detect2Chars attribute="Comment" context="#pop" char="*" char1="/" endRegion="Comment"/>
+        <DetectSpaces/>
+        <IncludeRules context="##Comments"/>
+      </context>
+
+      <context name="Preprocessor" attribute="Preprocessor" lineEndContext="#pop">
+        <LineContinue attribute="Preprocessor"/>
+        <RegExpr attribute="Preprocessor" String="\s*(?:if|ifdef|ifndef|elif|else|endif|define|undef|include|pragma|error|warning|line)\b"/>
+        <DetectChar attribute="Include" context="Include" char="&quot;"/>
+        <DetectChar attribute="Include" context="IncludeAngle" char="&lt;"/>
+        <Detect2Chars attribute="Comment" context="Comment" char="/" char1="/"/>
+        <Detect2Chars attribute="Comment" context="MultiComment" char="/" char1="*" beginRegion="Comment"/>
+      </context>
+      <context name="Include" attribute="Include" lineEndContext="#pop">
+        <DetectChar attribute="Include" context="#pop" char="&quot;"/>
+      </context>
+      <context name="IncludeAngle" attribute="Include" lineEndContext="#pop">
+        <DetectChar attribute="Include" context="#pop" char="&gt;"/>
+      </context>
+    </contexts>
+
+    <itemDatas>
+      <itemData name="Normal Text"  defStyleNum="dsNormal"/>
+      <itemData name="Section"      defStyleNum="dsBuiltIn"/>
+      <itemData name="Control Flow" defStyleNum="dsControlFlow"/>
+      <itemData name="Keyword"      defStyleNum="dsKeyword"/>
+      <itemData name="Modifier"     defStyleNum="dsKeyword"/>
+      <itemData name="Data Type"    defStyleNum="dsDataType"/>
+      <itemData name="Intrinsic"    defStyleNum="dsBuiltIn"/>
+      <itemData name="Annotation"   defStyleNum="dsAttribute"/>
+      <itemData name="Semantic"     defStyleNum="dsConstant"/>
+      <itemData name="Function"     defStyleNum="dsFunction"/>
+      <itemData name="Decimal"      defStyleNum="dsDecVal"/>
+      <itemData name="Hex"          defStyleNum="dsBaseN"/>
+      <itemData name="Float"        defStyleNum="dsFloat"/>
+      <itemData name="String"       defStyleNum="dsString"/>
+      <itemData name="String Char"  defStyleNum="dsSpecialChar"/>
+      <itemData name="Comment"      defStyleNum="dsComment"/>
+      <itemData name="Preprocessor" defStyleNum="dsPreprocessor"/>
+      <itemData name="Include"      defStyleNum="dsString"/>
+      <itemData name="Punctuation"  defStyleNum="dsNormal"/>
+      <itemData name="Operator"     defStyleNum="dsOperator"/>
+    </itemDatas>
+  </highlighting>
+  <general>
+    <comments>
+      <comment name="singleLine" start="//"/>
+      <comment name="multiLine" start="/*" end="*/" region="Comment"/>
+    </comments>
+    <keywords casesensitive="1"/>
+  </general>
+</language>
