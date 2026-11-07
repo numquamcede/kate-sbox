@@ -49,11 +49,13 @@ sealed class TokenCache( string directory )
 	/// <summary>
 	/// What Kate last sent in <c>initialize</c>, so a warm-up can initialize Roslyn the same way.
 	/// </summary>
-	public JsonNode? LoadClientParameters()
+	public JsonNode? LoadClientParameters() => LoadJson( ClientPath );
+
+	public static JsonNode? LoadJson( string path )
 	{
 		try
 		{
-			return JsonNode.Parse( File.ReadAllText( ClientPath ) );
+			return JsonNode.Parse( File.ReadAllText( path ) );
 		}
 		catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException or JsonException )
 		{
@@ -179,6 +181,30 @@ sealed class TokenCache( string directory )
 	string InitializePath( string key ) => Path.Combine( directory, $"initialize-{key[..16]}.json" );
 
 	string ClientPath => Path.Combine( directory, "client.json" );
+
+	string ProjectTypesPath( string projectFolder ) =>
+		Path.Combine( directory, "projects", Hash( Path.GetFullPath( projectFolder ).ToLowerInvariant() )[..32] + ".txt" );
+
+	public void SaveProjectTypes( string projectFolder, IEnumerable<string> entries ) =>
+		WriteAtomically( ProjectTypesPath( projectFolder ), stream => stream.Write( Encoding.UTF8.GetBytes( string.Join( '\n', entries ) ) ) );
+
+	/// <summary>
+	/// The type names of every project seen so far, as "T Name" or "E Name" (an enum).
+	/// </summary>
+	public IReadOnlyCollection<string> LoadAllProjectTypes()
+	{
+		try
+		{
+			return Directory.GetFiles( Path.Combine( directory, "projects" ), "*.txt" )
+				.SelectMany( File.ReadAllLines )
+				.Where( l => l.Length > 2 )
+				.ToHashSet();
+		}
+		catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
+		{
+			return [];
+		}
+	}
 
 	string TokensPath( string path ) =>
 		Path.Combine( directory, "tokens", Hash( Path.GetFullPath( path ).ToLowerInvariant() )[..32] + ".bin" );

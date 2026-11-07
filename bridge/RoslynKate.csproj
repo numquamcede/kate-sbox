@@ -16,4 +16,9 @@
 		<Version>0.1.0</Version>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<!-- What Kate 26.08 says it supports, so a warm-up can initialize Roslyn as Kate will -->
+		<None Include="kate-client.json" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
 </Project>

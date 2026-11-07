@@ -1,0 +1,96 @@
+{
+	"capabilities": {
+		"textDocument": {
+			"codeAction": {
+				"codeActionLiteralSupport": {
+					"codeActionKind": {
+						"valueSet": [
+							"quickfix",
+							"refactor",
+							"source"
+						]
+					}
+				}
+			},
+			"completion": {
+				"completionItem": {
+					"resolveSupport": {
+						"properties": [
+							"additionalTextEdits",
+							"documentation"
+						]
+					},
+					"snippetSupport": true
+				}
+			},
+			"documentSymbol": {
+				"hierarchicalDocumentSymbolSupport": true
+			},
+			"hover": {
+				"contentFormat": [
+					"markdown",
+					"plaintext"
+				]
+			},
+			"inlayHint": {
+				"dynamicRegistration": false
+			},
+			"publishDiagnostics": {
+				"relatedInformation": true
+			},
+			"selectionRange": {
+				"dynamicRegistration": false
+			},
+			"semanticTokens": {
+				"formats": [
+					"relative"
+				],
+				"requests": {
+					"full": {
+						"delta": true
+					},
+					"range": true
+				},
+				"tokenModifiers": [],
+				"tokenTypes": [
+					"namespace",
+					"type",
+					"class",
+					"enum",
+					"interface",
+					"struct",
+					"typeParameter",
+					"parameter",
+					"variable",
+					"property",
+					"enumMember",
+					"event",
+					"function",
+					"method",
+					"macro",
+					"keyword",
+					"modifier",
+					"comment",
+					"string",
+					"number",
+					"regexp",
+					"operator"
+				]
+			},
+			"synchronization": {
+				"didSave": true
+			}
+		},
+		"window": {
+			"showMessage": {
+				"messageActionItem": {
+					"additionalPropertiesSupport": true
+				}
+			},
+			"workDoneProgress": true
+		},
+		"workspace": {
+			"configuration": true
+		}
+	}
+}

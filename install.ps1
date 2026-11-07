@@ -40,8 +40,16 @@ if ( Get-Process kate -ErrorAction SilentlyContinue )
 # --- C# language server: the bridge, plus the Roslyn server it runs -----------------------------------
 
 Write-Host "Building roslyn-kate..."
-dotnet publish "$root\bridge\RoslynKate.csproj" -c Release -o $tools --nologo -v q
-if ( $LASTEXITCODE -ne 0 ) { throw "Building the bridge failed." }
+# As native code it starts in a few milliseconds, so Kate has its colours sooner. That needs Visual Studio's
+# C++ tools (found through vswhere); without them it's built for the .NET runtime instead.
+$env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"
+dotnet publish "$root\bridge\RoslynKate.csproj" -c Release -o $tools --nologo -v q -p:PublishAot=true -p:PublishReadyToRun=false -p:SelfContained=true -p:DebugType=none 2>&1 | Out-Null
+if ( $LASTEXITCODE -ne 0 )
+{
+	Write-Host "  No C++ build tools for a native build; building it for .NET instead."
+	dotnet publish "$root\bridge\RoslynKate.csproj" -c Release -o $tools --nologo -v q
+	if ( $LASTEXITCODE -ne 0 ) { throw "Building the bridge failed." }
+}
 
 $installed = if ( Test-Path "$tools\roslyn\VERSION" ) { ( Get-Content "$tools\roslyn\VERSION" ).Trim() }
 if ( $installed -ne $RoslynVersion )

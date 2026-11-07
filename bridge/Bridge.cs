@@ -112,7 +112,10 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		_warming = true;
 		_ = Guard( PumpServerToClientAsync( ct ) );
 
-		var parameters = cache.LoadClientParameters() ?? new JsonObject { ["capabilities"] = new JsonObject() };
+		// What Kate sent last time, or what Kate 26.08 sends if it hasn't run with the bridge yet
+		var parameters = cache.LoadClientParameters()
+			?? TokenCache.LoadJson( Path.Combine( AppContext.BaseDirectory, "kate-client.json" ) )
+			?? new JsonObject { ["capabilities"] = new JsonObject() };
 		parameters["processId"] = Environment.ProcessId;
 		parameters["rootUri"] = PathToUri( folder );
 		parameters["rootPath"] = folder;
@@ -262,6 +265,19 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 
 			if ( info.IsNotification && await HandleServerNotificationAsync( info, body, ct ) )
 				continue;
+
+			// With no Kate to ask, answer as Kate does when it has nothing to add; Roslyn waits for its
+			// settings before it finishes loading.
+			if ( _warming && info.IsRequest )
+			{
+				var items = info.Method == "workspace/configuration" ? JsonNode.Parse( body )?["params"]?["items"]?.AsArray().Count : null;
+				_ = WriteServerAsync( new JsonObject
+				{
+					["id"] = JsonNode.Parse( info.Id!.Value.GetRawText() ),
+					["result"] = items is { } count ? new JsonArray( Enumerable.Repeat<JsonNode?>( null, count ).ToArray() ) : null,
+				}, ct );
+				continue;
+			}
 
 			await client.WriteAsync( body, ct );
 		}
@@ -450,7 +466,8 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 
 	/// <summary>
 	/// Once the project has loaded, has Roslyn colour every source file in it and keeps the results for
-	/// next time; then does the same for files as they're saved or change on disk.
+	/// next time; then does the same for files as they're saved or change on disk, and for the whole
+	/// project again once that has settled, since a change to one file can change another's colours.
 	/// </summary>
 	async Task FillCacheAsync( string projectFolder, CancellationToken ct )
 	{
@@ -458,12 +475,25 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 
 		using var watcher = WatchSources( projectFolder );
 
-		// Every file once per session: a change to one file can change another's colours.
 		foreach ( var path in TokenCache.FindSources( projectFolder ) )
 			_toCache.Writer.TryWrite( path );
 
-		while ( await _toCache.Reader.WaitToReadAsync( ct ) )
+		var first = true;
+		var refreshAll = false;
+		var more = _toCache.Reader.WaitToReadAsync( ct ).AsTask();
+
+		while ( true )
 		{
+			if ( refreshAll && await Task.WhenAny( more, Task.Delay( TimeSpan.FromSeconds( 10 ), ct ) ) != more )
+			{
+				refreshAll = false;
+				await CacheTokensAsync( projectFolder, TokenCache.FindSources( projectFolder ).ToList(), ct );
+				continue;
+			}
+
+			if ( !await more )
+				return;
+
 			// Let a burst of saves arrive together
 			await Task.Delay( TimeSpan.FromSeconds( 1 ), ct );
 
@@ -471,6 +501,9 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 			while ( _toCache.Reader.TryRead( out var path ) ) batch.Add( Path.GetFullPath( path ) );
 
 			await CacheTokensAsync( projectFolder, batch, ct );
+			refreshAll = !first;
+			first = false;
+			more = _toCache.Reader.WaitToReadAsync( ct ).AsTask();
 		}
 	}
 
@@ -510,6 +543,18 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		}
 
 		log.Write( $"cached colours for {stored} of {paths.Count} files" );
+
+		if ( stored > 0 && _legendKey is { } key )
+		{
+			try
+			{
+				ProjectTypes.Update( cache, projectFolder, key, _tokenTypes, log );
+			}
+			catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
+			{
+				log.Write( $"couldn't update the C# highlighting: {e.Message}" );
+			}
+		}
 		return stored;
 	}
 

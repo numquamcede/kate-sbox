@@ -5,7 +5,7 @@ Use [Kate](https://kate-editor.org) as your [s&box](https://sbox.game) code edit
 - **C# IntelliSense** from the Roslyn language server, the same engine VS Code's C# Dev Kit runs on: completion, hover docs, go to definition (into decompiled engine code too), errors and warnings, semantic highlighting, inlay hints, rename, code actions and formatting. It loads the `.slnx` s&box generates, including the engine's editor projects.
 - **Kate in s&box**: a **Kate** entry under *Edit › Preferences › Code Editor*, so double-clicking a component or a compile error opens Kate at the right line.
 - **s&box file types**: highlighting for `.shader`/`.hlsl` (the `HEADER`/`MODES`/`VS`/`PS`/`CS` blocks, annotations, semantics) and `.razor` UI components.
-- **C# colours from the first moment**: Kate's C# highlighting is extended to colour types, namespaces and parameters where the code alone settles what they are, plus s&box's own type names, so a file looks the same before Roslyn has loaded as after.
+- **C# colours from the first moment**: Kate's C# highlighting is extended to colour types, namespaces and parameters where the code alone settles what they are, plus s&box's type names and your projects' own, so a file looks the same before Roslyn has loaded as after.
 - **Cate Pro**: a dark editor theme with warm accent colours, a matching window colour scheme, and file icons in the same style.
 
 ## Requirements
@@ -14,6 +14,7 @@ Use [Kate](https://kate-editor.org) as your [s&box](https://sbox.game) code edit
 - Kate 26.08 or newer: `winget install KDE.Kate`
 - .NET 10 SDK (the one s&box uses)
 - s&box
+- Optional: Visual Studio's *Desktop development with C++* tools. With them the bridge is built as native code, which starts in milliseconds rather than about a tenth of a second; without them it's built for .NET. The native build uses Microsoft's `Microsoft.DotNet.ILCompiler` package at build time, which NuGet currently flags with a security advisory (GHSA-p3jp-9v83-76w9); it doesn't end up in the bridge.
 
 ## Install
 
@@ -43,8 +44,9 @@ C# Dev Kit itself is licensed for Microsoft's editors only, but the language ser
 
 Roslyn can only colour types and parameters once it has loaded the project, which takes several seconds, and Kate keeps whatever colours it gets first. So `roslyn-kate` also remembers what Roslyn said, in `%LOCALAPPDATA%\kate-sbox\cache`:
 
-- After a project loads, it has Roslyn colour every `.cs` file in it, and again whenever one is saved or changes on disk. When Kate opens a file whose text matches, it gets those colours at once. `roslyn-kate --warm <project folder>` does the same without Kate; the installer runs it.
-- It answers Kate's `initialize` with Roslyn's answer from last time, so Kate can ask for colours while Roslyn is still starting. Everything else Kate sends waits until the project has loaded: a file opened before then is taken by Roslyn for a standalone file, outside the project.
+- After a project loads, it has Roslyn colour every `.cs` file in it, and again whenever one is saved or changes on disk, and the whole project once more after 10 quiet seconds, since one file's change can change another's colours. When Kate opens a file whose text matches, it gets those colours at once. `roslyn-kate --warm <project folder>` does the same without Kate; the installer runs it.
+- It answers Kate's `initialize` with Roslyn's answer from last time, so Kate can ask for colours while Roslyn is still starting. The warm-up initializes Roslyn the way Kate does (`bridge/kate-client.json` holds what Kate 26.08 sends, until Kate has run once), so that's ready from the first start. Everything else Kate sends waits until the project has loaded: a file opened before then is taken by Roslyn for a standalone file, outside the project.
+- It adds your projects' type names to your installed copy of the C# highlighting, so they're coloured before Roslyn loads too, even in new files. Kate picks them up the next time it starts.
 - It names records, delegates and extension methods to Kate as plain classes and methods, which Kate otherwise leaves uncoloured.
 
 It also ties the server's lifetime to its own, so restarting the server in Kate never leaves a Roslyn process behind.

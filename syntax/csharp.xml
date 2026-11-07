@@ -1821,6 +1821,13 @@
       <item>WrappedPropertySet</item>
       <item>YouTubePlayer</item>
     </list>
+    <!-- kate-sbox: the type names of your own projects; roslyn-kate fills these in your installed copy -->
+    <list name="project-types">
+      <item>__kate_sbox_none__</item>
+    </list>
+    <list name="project-enums">
+      <item>__kate_sbox_none__</item>
+    </list>
     <list name="sbox-enums">
       <item>AggregationType</item>
       <item>AiProfile</item>
@@ -2002,17 +2009,19 @@
         <DetectChar attribute="Symbol" context="AttributeList" char="[" firstNonSpace="true"/>
         <RegExpr attribute="Variable" context="LambdaBody" String="\b(?!(?:get|set|init|add|remove|_)\b)([a-z_]\w*)(?=\s*=&gt;)"/>
         <RegExpr attribute="Variable" String="\b(?:[TU]|T[A-Z][a-z]\w*)\b(?![.(&lt;])"/>
-        <RegExpr attribute="Data Type" context="GenericArguments" String="(?&lt;=\bnew\s)[A-Z]\w*(?=&lt;)"/>
-        <RegExpr attribute="Data Type" String="(?&lt;=\bnew\s)[A-Z]\w*(?=\s*[(\[{])"/>
-        <RegExpr attribute="Data Type" String="(?:(?&lt;=\btypeof\()|(?&lt;=\btypeof\(\s)|(?&lt;=\bis\s)|(?&lt;=\bis\snot\s)|(?&lt;=\bas\s))[A-Z]\w*(?![\w&lt;.(])"/>
-        <RegExpr attribute="Data Type" String="(?:(?&lt;=\bout\s)|(?&lt;=\bcatch\s\()|(?&lt;=\bcatch\s\(\s))[A-Z]\w*(?=\s+[A-Za-z_])"/>
+        <RegExpr attribute="Type Name" context="GenericArguments" String="(?&lt;=\bnew\s)[A-Z]\w*(?=&lt;)"/>
+        <RegExpr attribute="Type Name" String="(?&lt;=\bnew\s)[A-Z]\w*(?=\s*[(\[{])"/>
+        <RegExpr attribute="Type Name" String="(?:(?&lt;=\btypeof\()|(?&lt;=\btypeof\(\s)|(?&lt;=\bis\s)|(?&lt;=\bis\snot\s)|(?&lt;=\bas\s))[A-Z]\w*(?![\w&lt;.(])"/>
+        <RegExpr attribute="Type Name" String="(?:(?&lt;=\bout\s)|(?&lt;=\bcatch\s\()|(?&lt;=\bcatch\s\(\s))[A-Z]\w*(?=\s+[A-Za-z_])"/>
         <RegExpr attribute="Function" context="GenericArguments" String="\b[A-Za-z_]\w*(?=&lt;[\w\s,.?\[\]&lt;&gt;]*&gt;\s*\()"/>
-        <RegExpr attribute="Data Type" context="GenericArguments" String="\b[A-Z]\w*(?=&lt;[\w\s,.?\[\]&lt;&gt;]*&gt;(?:\[\])*\??\s+@?[A-Za-z_])"/>
-        <RegExpr attribute="Data Type" context="Declaration" String="\b[A-Z]\w*(?=(?:\[\])*\??\s+(?!(?:is|as|in|out|ref|when|and|or|not|with|switch|where|on|equals|by|into|select|from|let|join|orderby|group|ascending|descending|var|new)\b)@?[A-Za-z_]\w*\s*(?:[;={(,)]|=&gt;))"/>
+        <RegExpr attribute="Type Name" context="GenericArguments" String="\b[A-Z]\w*(?=&lt;[\w\s,.?\[\]&lt;&gt;]*&gt;(?:\[\])*\??\s+@?[A-Za-z_])"/>
+        <RegExpr attribute="Type Name" context="Declaration" String="\b[A-Z]\w*(?=(?:\[\])*\??\s+(?!(?:is|as|in|out|ref|when|and|or|not|with|switch|where|on|equals|by|into|select|from|let|join|orderby|group|ascending|descending|var|new)\b)@?[A-Za-z_]\w*\s*(?:[;={(,)]|=&gt;))"/>
         <RegExpr attribute="Data Type" context="Declaration" String="\b(?:bool|byte|char|decimal|double|float|int|long|object|uint|ushort|ulong|sbyte|short|string)(?=(?:\[\])*\??\s+@?[A-Za-z_]\w*\s*[,)])"/>
         <RegExpr attribute="Keyword" String="\b(?:System|Sandbox|Microsoft|Facepunch|Steamworks)(?=\.[A-Za-z])"/>
-        <keyword attribute="Data Type" context="EnumMember" String="sbox-enums"/>
-        <keyword attribute="Data Type" String="sbox-types"/>
+        <keyword attribute="Type Name" context="EnumMember" String="sbox-enums"/>
+        <keyword attribute="Type Name" String="sbox-types"/>
+        <keyword attribute="Type Name" context="EnumMember" String="project-enums"/>
+        <keyword attribute="Type Name" String="project-types"/>
         <!-- kate-sbox end -->
         <keyword attribute="Keyword" context="#stay" String="keywords"/>
         <keyword attribute="Data Type" context="#stay" String="types" />
@@ -2082,7 +2091,7 @@
       <!-- kate-sbox: class / struct / interface / enum Name<TypeParameters> : BaseTypes -->
       <context name="TypeDeclaration" attribute="Normal Text" lineEndContext="#pop" fallthrough="true" fallthroughContext="#pop">
         <DetectSpaces/>
-        <RegExpr attribute="Data Type" context="#pop!TypeDeclarationTail" String="[A-Za-z_]\w*"/>
+        <RegExpr attribute="Type Name" context="#pop!TypeDeclarationTail" String="[A-Za-z_]\w*"/>
       </context>
       <context name="TypeDeclarationTail" attribute="Normal Text" lineEndContext="#stay" fallthrough="true" fallthroughContext="#pop">
         <DetectSpaces/>
@@ -2110,9 +2119,9 @@
         <keyword attribute="Data Type" String="types"/>
         <RegExpr attribute="Variable" String="\b(?:[TU]|T[A-Z][a-z]\w*)\b(?![.&lt;])"/>
         <RegExpr attribute="Keyword" context="NamespaceChain" String="\b(?:System|Sandbox|Editor|Microsoft|Facepunch|Steamworks)(?=\.)"/>
-        <RegExpr attribute="Data Type" String="[A-Za-z_]\w*(?=\s*\.)"/>
-        <RegExpr attribute="Data Type" context="GenericArguments" String="[A-Za-z_]\w*(?=&lt;)"/>
-        <RegExpr attribute="Data Type" String="[A-Za-z_]\w*"/>
+        <RegExpr attribute="Type Name" String="[A-Za-z_]\w*(?=\s*\.)"/>
+        <RegExpr attribute="Type Name" context="GenericArguments" String="[A-Za-z_]\w*(?=&lt;)"/>
+        <RegExpr attribute="Type Name" String="[A-Za-z_]\w*"/>
         <AnyChar attribute="Symbol" String=",.?[]"/>
       </context>
       <context name="GenericArguments" attribute="Normal Text" lineEndContext="#pop" fallthrough="true" fallthroughContext="#pop">
@@ -2135,7 +2144,7 @@
       <context name="AttributeList" attribute="Normal Text" lineEndContext="#pop">
         <DetectSpaces/>
         <DetectChar attribute="Symbol" context="#pop" char="]"/>
-        <RegExpr attribute="Data Type" String="[A-Za-z_]\w*(?=\s*[\],(])"/>
+        <RegExpr attribute="Type Name" String="[A-Za-z_]\w*(?=\s*[\],(])"/>
         <DetectChar attribute="Symbol" context="AttributeArguments" char="("/>
         <IncludeRules context="Normal"/>
       </context>
@@ -2148,7 +2157,7 @@
       <context name="NamespaceChain" attribute="Normal Text" lineEndContext="#pop" fallthrough="true" fallthroughContext="#pop">
         <DetectChar attribute="Symbol" char="."/>
         <RegExpr attribute="Keyword" String="[A-Za-z_]\w*(?=\.)"/>
-        <RegExpr attribute="Data Type" context="#pop" String="[A-Za-z_]\w*"/>
+        <RegExpr attribute="Type Name" context="#pop" String="[A-Za-z_]\w*"/>
       </context>
 
       <!-- kate-sbox: KnownEnum.Member -->
@@ -2199,6 +2208,8 @@
       <itemData name="Keyword"      defStyleNum="dsKeyword"/>
       <itemData name="Function"     defStyleNum="dsFunction"/>
       <itemData name="Data Type"    defStyleNum="dsDataType"/>
+      <!-- kate-sbox: names of types; unlike Data Type (built-in types), no theme makes these italic, as Roslyn's aren't -->
+      <itemData name="Type Name"    defStyleNum="dsDataType"/>
       <itemData name="Variable"     defStyleNum="dsVariable"/>
       <itemData name="Constant"     defStyleNum="dsConstant"/>
       <itemData name="Decimal"      defStyleNum="dsDecVal"/>
