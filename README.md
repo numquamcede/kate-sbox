@@ -26,7 +26,7 @@ Then in the s&box editor pick **Edit › Preferences › Code Editor › Kate**.
 
 The installer builds the bridge, downloads the Roslyn server from Microsoft's package feed, adds the Kate option to s&box, and sets Kate up (theme, colours, icons, highlighting, LSP config). It keeps your other Kate settings, and is safe to run again; rerun it after an s&box update, which can remove the Kate option.
 
-Open a project by opening its folder in Kate (or *Open Solution* in s&box). The first time, C# needs a few seconds to load; Kate shows "IntelliSense is ready" when it has.
+Open a project by opening its folder in Kate (or *Open Solution* in s&box). The first time, C# needs a few seconds to load; Kate shows "IntelliSense is ready" when it has. After that, files open with their full colours straight away, even before the project has loaded.
 
 ## How the C# support works
 
@@ -39,6 +39,11 @@ C# Dev Kit itself is licensed for Microsoft's editors only, but the language ser
 | Edits arrive as ranges | Kate can send whole-document changes, which crash Roslyn's change handler; those are sent as a close and reopen |
 | The client re-requests colours and diagnostics when told to refresh | Holds a file's first colour request until Roslyn has a full compilation, and re-pushes diagnostics after the project loads |
 | Custom toast notifications | Shown as normal Kate messages |
+
+Roslyn can only colour types and parameters once it has loaded the project, which takes several seconds, and Kate keeps whatever colours it gets first. So `roslyn-kate` also remembers what Roslyn said, in `%LOCALAPPDATA%\kate-sbox\cache`:
+
+- After a project loads, it has Roslyn colour every `.cs` file in it, and again whenever one is saved or changes on disk. When Kate opens a file whose text matches, it gets those colours at once.
+- It answers Kate's `initialize` with Roslyn's answer from last time, so Kate can ask for colours while Roslyn is still starting.
 
 It also ties the server's lifetime to its own, so restarting the server in Kate never leaves a Roslyn process behind.
 
@@ -59,6 +64,7 @@ It also ties the server's lifetime to its own, so restarting the server in Kate 
 
 - **"AppData writes from this PowerShell are redirected"**: the PowerShell you ran the installer from belongs to a packaged app that keeps AppData changes in its own folder, so Kate would never see them. Run it again from Windows PowerShell opened from the Start menu. This is also why an older install can leave Kate with its default theme and no C#.
 - **No IntelliSense**: check *Output › LSP Client* in Kate and `%LOCALAPPDATA%\kate-sbox\logs\roslyn-kate.log`. *LSP Client › Restart All LSP Servers* restarts it.
+- **Colours that look out of date**: cached colours are only used for a file whose text hasn't changed, but a change in another file (say, a class renamed while Kate was closed) can leave a file's old colours until you edit or scroll it. Clearing the cache rules it out: close Kate and delete `%LOCALAPPDATA%\kate-sbox\cache`; it fills up again the next time a project loads.
 - **"No solution next to …sbproj"**: open the project in the s&box editor once; it generates the `.slnx` and `.csproj` files.
 - **Kate missing from s&box's code editors**: rerun `install.ps1` (an s&box update can remove it), then restart the s&box editor.
 - **Warnings like `InteropSystem: Tried to get … as Editor.Widget` after installing**: adding the Kate option while the s&box editor is open makes it hot-reload its tools; restart the editor.

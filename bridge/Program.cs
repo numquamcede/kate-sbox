@@ -57,14 +57,25 @@ static class Program
 		foreach ( var arg in new[] { "--stdio", "--logLevel", logLevel, "--extensionLogDirectory", logDirectory }.Concat( extraArgs ) )
 			startInfo.ArgumentList.Add( arg );
 
-		using var process = Process.Start( startInfo )!;
-		ChildProcessJob.Add( process );
+		// Starting a process takes a while; Kate can get cached answers in the meantime
+		var starting = Task.Run( () =>
+		{
+			var started = Process.Start( startInfo )!;
+			ChildProcessJob.Add( started );
+			return started;
+		} );
 		using var cts = new CancellationTokenSource();
+
+		// Cached answers from Roslyn are only reused with the same server build
+		var server = new FileInfo( serverPath );
+		var serverKey = $"{server.FullName}|{server.Length}|{server.LastWriteTimeUtc.Ticks}";
 
 		var bridge = new Bridge(
 			client: new LspChannel( Console.OpenStandardInput(), Console.OpenStandardOutput() ),
-			server: new LspChannel( process.StandardOutput.BaseStream, process.StandardInput.BaseStream ),
-			log );
+			serverStarting: starting.ContinueWith( t => new LspChannel( t.Result.StandardOutput.BaseStream, t.Result.StandardInput.BaseStream ), TaskScheduler.Default ),
+			log,
+			TokenCache.Default(),
+			serverKey );
 
 		try
 		{
@@ -73,24 +84,31 @@ static class Program
 		finally
 		{
 			cts.Cancel();
-
-			// After exit Roslyn stops serving but keeps running until its stdin closes, so close it,
-			// and only kill it if that doesn't do the job either.
-			if ( !process.WaitForExit( TimeSpan.FromSeconds( 2 ) ) )
-			{
-				try { process.StandardInput.Close(); } catch ( IOException ) { }
-			}
-
-			if ( !process.WaitForExit( TimeSpan.FromSeconds( 5 ) ) )
-			{
-				log.Write( "server didn't exit, killing it" );
-				process.Kill( entireProcessTree: true );
-			}
-
-			log.Write( $"server exited with {process.ExitCode}" );
+			Stop( await starting, log );
 		}
 
+		using var process = await starting;
 		return process.ExitCode;
+	}
+
+	/// <summary>
+	/// After exit Roslyn stops serving but keeps running until its stdin closes, so close it,
+	/// and only kill it if that doesn't do the job either.
+	/// </summary>
+	static void Stop( Process process, Log log )
+	{
+		if ( !process.WaitForExit( TimeSpan.FromSeconds( 2 ) ) )
+		{
+			try { process.StandardInput.Close(); } catch ( IOException ) { }
+		}
+
+		if ( !process.WaitForExit( TimeSpan.FromSeconds( 5 ) ) )
+		{
+			log.Write( "server didn't exit, killing it" );
+			process.Kill( entireProcessTree: true );
+		}
+
+		log.Write( $"server exited with {process.ExitCode}" );
 	}
 
 	/// <summary>

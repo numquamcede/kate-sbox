@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 
 namespace RoslynKate;
 
@@ -12,12 +13,23 @@ namespace RoslynKate;
 /// <item>Runs NuGet restore when Roslyn asks for it.</item>
 /// <item>Turns Roslyn's custom toasts and load notifications into standard <c>window/showMessage</c>.</item>
 /// <item>Re-pulls diagnostics for open files when Roslyn asks for a refresh, which Kate doesn't support.</item>
+/// <item>Gives Kate a file's colours from last time straight away (see <see cref="TokenCache"/>).</item>
 /// </list>
 /// Everything else is forwarded untouched.
 /// </summary>
-sealed class Bridge( LspChannel client, LspChannel server, Log log )
+/// <param name="serverStarting">Roslyn's channel, once its process is up; starting it doesn't hold up answering Kate.</param>
+sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log, TokenCache cache, string serverKey )
 {
 	const string IdPrefix = "roslyn-kate/";
+
+	/// <summary>
+	/// Token types worth hovering to make Roslyn build a project's compilation; see <see cref="ForceCompilationAsync"/>.
+	/// </summary>
+	static readonly HashSet<string> SymbolTokenTypes =
+	[
+		"namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property",
+		"enumMember", "event", "function", "method", "constant", "delegate", "extensionMethod", "field", "recordClass", "recordStruct",
+	];
 
 	readonly ConcurrentDictionary<string, TaskCompletionSource<JsonNode?>> _pending = new();
 
@@ -25,6 +37,21 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 	/// Open documents by uri, with the languageId Kate opened them with.
 	/// </summary>
 	readonly ConcurrentDictionary<string, string> _openDocuments = new();
+
+	/// <summary>
+	/// Hash of Kate's text for each open document, while we know it: from opening or saving it until the next edit.
+	/// </summary>
+	readonly ConcurrentDictionary<string, string> _documentHashes = new();
+
+	/// <summary>
+	/// Documents Kate has had colours for from the cache, so that's only logged once per document.
+	/// </summary>
+	readonly ConcurrentDictionary<string, byte> _servedFromCache = new();
+
+	/// <summary>
+	/// Completes once Roslyn has answered <c>initialize</c>. Nothing else may reach it before then.
+	/// </summary>
+	readonly TaskCompletionSource _serverInitialized = new( TaskCreationOptions.RunContinuationsAsynchronously );
 
 	/// <summary>
 	/// Completes once Roslyn has loaded the workspace (or there's nothing to load, or it gave up).
@@ -35,10 +62,30 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 	/// Per document, completes once Roslyn has a full compilation for it (see <see cref="WarmUpAsync"/>).
 	/// </summary>
 	readonly ConcurrentDictionary<string, Task> _warmDocuments = new();
+
+	/// <summary>
+	/// Source files whose colours should be (re)cached, see <see cref="FillCacheAsync"/>.
+	/// </summary>
+	readonly Channel<string> _toCache = Channel.CreateUnbounded<string>();
+
+	readonly Lock _writeLock = new();
+	Task? _serverWrites;
 	int _nextId;
 	string? _rootPath;
 	string? _loadedName;
 	int _loadCount;
+
+	/// <summary>
+	/// The raw id of Kate's initialize request, while it's with Roslyn.
+	/// </summary>
+	string? _initializeId;
+	string? _initializeKey;
+
+	/// <summary>
+	/// Identifies the token legend Kate is using, so cached tokens are only used with the legend they were made for.
+	/// </summary>
+	string? _legendKey;
+	string[] _tokenTypes = [];
 
 	public async Task RunAsync( CancellationToken ct )
 	{
@@ -58,26 +105,46 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 			{
 				case "initialize":
 					CaptureRoot( body );
-					break;
+					if ( await TryInitializeFromCacheAsync( body, ct ) ) continue;
+
+					// First run with this server and this Kate: Roslyn answers, and the answer is kept for next time.
+					_initializeId = info.Id?.GetRawText();
+					await ( await serverStarting ).WriteAsync( body, ct );
+					continue;
 				case "textDocument/didOpen":
 					var doc = JsonNode.Parse( body )?["params"]?["textDocument"];
 					if ( doc?["uri"]?.GetValue<string>() is { } opened )
+					{
 						_openDocuments[opened] = doc["languageId"]?.GetValue<string>() ?? "csharp";
+						_documentHashes[opened] = TokenCache.HashText( doc["text"]?.GetValue<string>() ?? "" );
+					}
 					break;
 				case "textDocument/didClose":
-					if ( GetDocumentUri( body ) is { } closed ) _openDocuments.TryRemove( closed, out _ );
+					if ( GetDocumentUri( body ) is { } closed )
+					{
+						_openDocuments.TryRemove( closed, out _ );
+						_documentHashes.TryRemove( closed, out _ );
+					}
 					break;
 				case "textDocument/didChange":
-					if ( await TrySendFullSyncChangeAsync( body, ct ) ) continue;
+					if ( GetDocumentUri( body ) is { } changed ) _documentHashes.TryRemove( changed, out _ );
+					if ( TrySendFullSyncChange( body, ct ) ) continue;
+					break;
+				case "textDocument/didSave":
+					// Kate's text is what's on disk now, so the cache applies to it again once it's updated
+					if ( GetDocumentUri( body ) is { } saved && TryHashFile( UriToPath( saved ) ) is { } savedHash )
+						_documentHashes[saved] = savedHash;
 					break;
 
-				// Roslyn answers semantic tokens from whatever compilation it has so far and sends a refresh
-				// request once the full one is ready. Kate ignores that refresh, so a file's first colours
-				// would stay wrong (engine types uncoloured) until the next edit or scroll. Hold a document's
-				// first request until Roslyn has a full compilation for it.
 				case { } method when method.StartsWith( "textDocument/semanticTokens" ):
 					if ( GetDocumentUri( body ) is { } uri )
 					{
+						if ( await TryAnswerTokensFromCacheAsync( info, body, uri, ct ) ) continue;
+
+						// Roslyn answers semantic tokens from whatever compilation it has so far and sends a refresh
+						// request once the full one is ready. Kate ignores that refresh, so a file's first colours
+						// would stay wrong (engine types uncoloured) until the next edit or scroll. Hold a document's
+						// first request until Roslyn has a full compilation for it.
 						var warm = _warmDocuments.GetOrAdd( uri, u => WarmUpAsync( u, ct ) );
 						if ( !warm.IsCompleted )
 						{
@@ -88,7 +155,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 					break;
 			}
 
-			await server.WriteAsync( body, ct );
+			var forwarded = WriteServerAsync( body, ct );
 
 			if ( info.Method == "initialized" )
 				_ = Guard( OpenWorkspaceAsync( ct ) );
@@ -97,6 +164,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 			if ( info.Method == "exit" )
 			{
 				log.Write( "client sent exit" );
+				await Task.WhenAny( forwarded, Task.Delay( TimeSpan.FromSeconds( 5 ), ct ) );
 				return;
 			}
 		}
@@ -106,6 +174,8 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 
 	async Task PumpServerToClientAsync( CancellationToken ct )
 	{
+		var server = await serverStarting;
+
 		while ( await server.ReadAsync( ct ) is { } body )
 		{
 			var info = MessageInfo.Peek( body );
@@ -114,6 +184,12 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 			{
 				CompletePending( bridgeId, body );
 				continue;
+			}
+
+			if ( info.IsResponse && _initializeId is not null && info.Id?.GetRawText() == _initializeId )
+			{
+				_initializeId = null;
+				OnServerInitialized( JsonNode.Parse( body )?["result"], answeredWith: null );
 			}
 
 			if ( info.IsRequest && await HandleServerRequestAsync( info, body, ct ) )
@@ -183,6 +259,268 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 		return false;
 	}
 
+	/// <summary>
+	/// Roslyn takes a second or two to answer <c>initialize</c>, and Kate asks for nothing (colours
+	/// included) until it has the answer. So when we have Roslyn's answer from last time, for the same
+	/// server and the same Kate, Kate gets that straight away while Roslyn starts up behind it.
+	/// </summary>
+	async Task<bool> TryInitializeFromCacheAsync( byte[] body, CancellationToken ct )
+	{
+		var request = JsonNode.Parse( body )!;
+		var p = request["params"];
+		_initializeKey = TokenCache.Key( serverKey, p?["capabilities"]?.ToJsonString(), p?["initializationOptions"]?.ToJsonString() );
+
+		var cached = cache.LoadInitializeResult( _initializeKey );
+		if ( cached is null )
+			return false;
+
+		UseLegend( cached );
+		await client.WriteAsync( new JsonObject { ["id"] = request["id"]?.DeepClone(), ["result"] = cached.DeepClone() }, ct );
+
+		var id = IdPrefix + "initialize";
+		var answer = new TaskCompletionSource<JsonNode?>( TaskCreationOptions.RunContinuationsAsynchronously );
+		_pending[id] = answer;
+		request["id"] = id;
+
+		_ = Guard( FinishInitializeAsync( request, answer.Task, cached, ct ) );
+		log.Write( "answered initialize from the cache" );
+		return true;
+	}
+
+	async Task FinishInitializeAsync( JsonNode request, Task<JsonNode?> answer, JsonNode cached, CancellationToken ct )
+	{
+		try
+		{
+			await ( await serverStarting ).WriteAsync( request, ct );
+			OnServerInitialized( await answer, cached );
+		}
+		finally
+		{
+			_serverInitialized.TrySetResult();
+		}
+	}
+
+	/// <summary>
+	/// Roslyn has answered <c>initialize</c>: let everything queued for it through, and keep the answer for next time.
+	/// </summary>
+	void OnServerInitialized( JsonNode? result, JsonNode? answeredWith )
+	{
+		if ( result is not null && _initializeKey is not null )
+		{
+			// Kate keeps the capabilities it was given first, so only a fresh answer sets the legend.
+			if ( answeredWith is null )
+				UseLegend( result );
+
+			if ( answeredWith is null || !JsonNode.DeepEquals( result, answeredWith ) )
+			{
+				cache.SaveInitializeResult( _initializeKey, result );
+				if ( answeredWith is not null )
+					log.Write( "Roslyn's capabilities changed since last time; Kate gets them from the next start" );
+			}
+		}
+
+		_serverInitialized.TrySetResult();
+	}
+
+	void UseLegend( JsonNode initializeResult )
+	{
+		var legend = initializeResult["capabilities"]?["semanticTokensProvider"]?["legend"];
+		_legendKey = TokenCache.Key( legend?.ToJsonString() );
+		_tokenTypes = legend?["tokenTypes"]?.AsArray().Select( t => t?.GetValue<string>() ?? "" ).ToArray() ?? [];
+	}
+
+	/// <summary>
+	/// Answers a semantic tokens request from the cache when Kate's text for the file is what the cached
+	/// tokens were made from, so the file has its final colours straight away rather than once Roslyn has
+	/// loaded the project. Kate only asks again after an edit, a scroll or switching tabs, so a guess here
+	/// would stick; the cache is never a guess.
+	/// </summary>
+	async Task<bool> TryAnswerTokensFromCacheAsync( MessageInfo info, byte[] body, string uri, CancellationToken ct )
+	{
+		if ( _legendKey is null || !_documentHashes.TryGetValue( uri, out var hash ) )
+			return false;
+
+		var data = cache.LoadTokens( UriToPath( uri ), _legendKey, hash );
+		if ( data is null )
+			return false;
+
+		var request = JsonNode.Parse( body );
+		if ( info.Method == "textDocument/semanticTokens/range" && request?["params"]?["range"] is { } range )
+			data = TokenCache.Slice( data, range["start"]?["line"]?.GetValue<int>() ?? 0, range["end"]?["line"]?.GetValue<int>() ?? int.MaxValue );
+
+		await client.WriteAsync( new JsonObject
+		{
+			["id"] = request?["id"]?.DeepClone(),
+			["result"] = new JsonObject { ["data"] = new JsonArray( data.Select( v => (JsonNode)v ).ToArray() ) },
+		}, ct );
+
+		if ( _servedFromCache.TryAdd( uri, 0 ) )
+			log.Write( $"colours for {UriToPath( uri )} from the cache" );
+
+		return true;
+	}
+
+	/// <summary>
+	/// Once the project has loaded, has Roslyn colour every source file in it and keeps the results for
+	/// next time; then does the same for files as they're saved or change on disk.
+	/// </summary>
+	async Task FillCacheAsync( string projectFolder, CancellationToken ct )
+	{
+		await _workspaceReady.Task.WaitAsync( ct );
+
+		using var watcher = WatchSources( projectFolder );
+
+		// Every file once per session: a change to one file can change another's colours.
+		foreach ( var path in TokenCache.FindSources( projectFolder ) )
+			_toCache.Writer.TryWrite( path );
+
+		while ( await _toCache.Reader.WaitToReadAsync( ct ) )
+		{
+			// Let a burst of saves arrive together
+			await Task.Delay( TimeSpan.FromSeconds( 1 ), ct );
+
+			var batch = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+			while ( _toCache.Reader.TryRead( out var path ) ) batch.Add( Path.GetFullPath( path ) );
+
+			await CacheTokensAsync( projectFolder, batch, ct );
+		}
+	}
+
+	async Task CacheTokensAsync( string projectFolder, IReadOnlyCollection<string> paths, CancellationToken ct )
+	{
+		var stored = 0;
+
+		foreach ( var project in paths.GroupBy( p => OwningProjectFolder( p, projectFolder ), StringComparer.OrdinalIgnoreCase ) )
+		{
+			// Roslyn colours from whatever compilation it has, which right after loading is a partial one;
+			// colours from that must never be cached, so make it build the full one first.
+			if ( !await ForceCompilationAsync( project, ct ) )
+			{
+				log.Write( $"couldn't get a full compilation for {project.Key}, not caching its colours" );
+				continue;
+			}
+
+			foreach ( var path in project )
+			{
+				// Kate's unsaved text isn't what's on disk, and Roslyn colours Kate's text
+				if ( TryHashFile( path ) is not { } hash || KateHasDifferentText( path, hash ) )
+					continue;
+
+				if ( _legendKey is { } legendKey && await RequestTokensAsync( path, ct ) is { } tokens )
+				{
+					cache.SaveTokens( path, legendKey, hash, tokens );
+					stored++;
+				}
+			}
+		}
+
+		log.Write( $"cached colours for {stored} of {paths.Count} files" );
+	}
+
+	/// <summary>
+	/// Hovering a symbol makes Roslyn bind it, which builds the project's full compilation; after that its
+	/// tokens for every file in the project are final.
+	/// </summary>
+	async Task<bool> ForceCompilationAsync( IEnumerable<string> paths, CancellationToken ct )
+	{
+		foreach ( var path in paths )
+		{
+			if ( await RequestTokensAsync( path, ct ) is not { } tokens )
+				continue;
+
+			var symbol = TokenCache.Positions( tokens )
+				.FirstOrDefault( t => t.Type < _tokenTypes.Length && SymbolTokenTypes.Contains( _tokenTypes[t.Type] ), (Line: -1, Character: 0, Type: 0) );
+			if ( symbol.Line < 0 )
+				continue;
+
+			await RequestFromServerAsync( "textDocument/hover", new JsonObject
+			{
+				["textDocument"] = new JsonObject { ["uri"] = PathToUri( path ) },
+				["position"] = new JsonObject { ["line"] = symbol.Line, ["character"] = symbol.Character },
+			}, ct );
+			return true;
+		}
+
+		return false;
+	}
+
+	async Task<int[]?> RequestTokensAsync( string path, CancellationToken ct )
+	{
+		var result = await RequestFromServerAsync( "textDocument/semanticTokens/full", new JsonObject
+		{
+			["textDocument"] = new JsonObject { ["uri"] = PathToUri( path ) },
+		}, ct );
+
+		return result?["data"]?.AsArray().Select( v => v?.GetValue<int>() ?? 0 ).ToArray();
+	}
+
+	FileSystemWatcher? WatchSources( string projectFolder )
+	{
+		try
+		{
+			var watcher = new FileSystemWatcher( projectFolder, "*.cs" )
+			{
+				IncludeSubdirectories = true,
+				NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+			};
+
+			FileSystemEventHandler queue = ( _, e ) =>
+			{
+				var relative = Path.GetRelativePath( projectFolder, Path.GetDirectoryName( e.FullPath )! );
+				if ( relative == "." || !relative.Split( Path.DirectorySeparatorChar ).Any( TokenCache.IsSkipped ) )
+					_toCache.Writer.TryWrite( e.FullPath );
+			};
+
+			watcher.Changed += queue;
+			watcher.Created += queue;
+			watcher.Renamed += ( s, e ) => queue( s, e );
+			watcher.EnableRaisingEvents = true;
+			return watcher;
+		}
+		catch ( Exception e ) when ( e is IOException or ArgumentException or PlatformNotSupportedException )
+		{
+			log.Write( $"not watching {projectFolder} for changes: {e.Message}" );
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// The folder of the project a file belongs to: the nearest folder above it with a .csproj, within the project folder.
+	/// </summary>
+	static string OwningProjectFolder( string path, string projectFolder )
+	{
+		for ( var folder = Path.GetDirectoryName( path ); folder is not null && folder.Length >= projectFolder.Length; folder = Path.GetDirectoryName( folder ) )
+		{
+			if ( Directory.EnumerateFiles( folder, "*.csproj" ).Any() )
+				return folder;
+		}
+
+		return projectFolder;
+	}
+
+	bool KateHasDifferentText( string path, string diskHash )
+	{
+		foreach ( var uri in _openDocuments.Keys )
+		{
+			if ( string.Equals( UriToPath( uri ), path, StringComparison.OrdinalIgnoreCase ) )
+				return !_documentHashes.TryGetValue( uri, out var hash ) || hash != diskHash;
+		}
+
+		return false;
+	}
+
+	static string? TryHashFile( string path )
+	{
+		try
+		{
+			return TokenCache.HashText( File.ReadAllText( path ) );
+		}
+		catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
+		{
+			return null;
+		}
+	}
+
 	async Task ForwardAfterAsync( Task gate, byte[] body, CancellationToken ct )
 	{
 		try
@@ -194,7 +532,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 			log.Write( $"warm-up failed, forwarding anyway: {e.Message}" );
 		}
 
-		await server.WriteAsync( body, ct );
+		await WriteServerAsync( body, ct );
 	}
 
 	/// <summary>
@@ -223,7 +561,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 	/// incremental sync is on) throws inside its didChange handler, which shuts the server down.
 	/// So a whole-document change is sent as a close and reopen with the new text instead.
 	/// </summary>
-	async Task<bool> TrySendFullSyncChangeAsync( byte[] body, CancellationToken ct )
+	bool TrySendFullSyncChange( byte[] body, CancellationToken ct )
 	{
 		var p = JsonNode.Parse( body )?["params"];
 		var changes = p?["contentChanges"]?.AsArray();
@@ -244,13 +582,13 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 
 		var languageId = _openDocuments.TryGetValue( uri, out var id ) ? id : "csharp";
 
-		await server.WriteAsync( new JsonObject
+		_ = WriteServerAsync( new JsonObject
 		{
 			["method"] = "textDocument/didClose",
 			["params"] = new JsonObject { ["textDocument"] = new JsonObject { ["uri"] = uri } },
 		}, ct );
 
-		await server.WriteAsync( new JsonObject
+		_ = WriteServerAsync( new JsonObject
 		{
 			["method"] = "textDocument/didOpen",
 			["params"] = new JsonObject
@@ -269,7 +607,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 		var rest = changes.Skip( lastFull + 1 ).Select( c => c?.DeepClone() ).ToArray();
 		if ( rest.Length > 0 )
 		{
-			await server.WriteAsync( new JsonObject
+			_ = WriteServerAsync( new JsonObject
 			{
 				["method"] = "textDocument/didChange",
 				["params"] = new JsonObject
@@ -315,6 +653,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 			_loadedName = Path.GetFileName( target.Solution );
 			log.Write( $"opening solution {target.Solution}" );
 			await SendToServerAsync( "solution/open", new JsonObject { ["solution"] = PathToUri( target.Solution ) }, ct );
+			_ = Guard( FillCacheAsync( Path.GetDirectoryName( target.Solution )!, ct ) );
 		}
 		else if ( target.Projects.Count > 0 )
 		{
@@ -322,6 +661,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 			log.Write( $"opening projects {string.Join( ", ", target.Projects )}" );
 			var uris = new JsonArray( target.Projects.Select( p => (JsonNode)PathToUri( p ) ).ToArray() );
 			await SendToServerAsync( "project/open", new JsonObject { ["projects"] = uris }, ct );
+			_ = Guard( FillCacheAsync( _rootPath, ct ) );
 		}
 		else
 		{
@@ -385,7 +725,7 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 		_pending[id] = tcs;
 		ct.Register( () => tcs.TrySetCanceled() );
 
-		_ = Guard( server.WriteAsync( new JsonObject { ["id"] = id, ["method"] = method, ["params"] = parameters }, ct ) );
+		_ = WriteServerAsync( new JsonObject { ["id"] = id, ["method"] = method, ["params"] = parameters }, ct );
 		return tcs.Task;
 	}
 
@@ -405,11 +745,43 @@ sealed class Bridge( LspChannel client, LspChannel server, Log log )
 		tcs.TrySetResult( response?["result"] );
 	}
 
+	/// <summary>
+	/// Everything for Roslyn after <c>initialize</c> goes through here, in order, and waits until Roslyn
+	/// has answered <c>initialize</c>: when Kate got the answer from the cache, it carries on before
+	/// Roslyn is up. The returned task never faults.
+	/// </summary>
+	Task WriteServerAsync( byte[] body, CancellationToken ct ) => QueueServerWrite( async () => await ( await serverStarting ).WriteAsync( body, ct ) );
+
+	Task WriteServerAsync( JsonNode message, CancellationToken ct ) => QueueServerWrite( async () => await ( await serverStarting ).WriteAsync( message, ct ) );
+
+	Task QueueServerWrite( Func<Task> write )
+	{
+		lock ( _writeLock )
+			return _serverWrites = WriteAfterAsync( _serverWrites ?? _serverInitialized.Task, write );
+	}
+
+	async Task WriteAfterAsync( Task previous, Func<Task> write )
+	{
+		await previous;
+
+		try
+		{
+			await write();
+		}
+		catch ( OperationCanceledException )
+		{
+		}
+		catch ( Exception e )
+		{
+			log.Write( $"writing to the server failed: {e.Message}" );
+		}
+	}
+
 	Task SendToServerAsync( string method, JsonNode parameters, CancellationToken ct ) =>
-		server.WriteAsync( new JsonObject { ["method"] = method, ["params"] = parameters }, ct );
+		WriteServerAsync( new JsonObject { ["method"] = method, ["params"] = parameters }, ct );
 
 	Task ReplyToServerAsync( MessageInfo request, CancellationToken ct ) =>
-		server.WriteAsync( new JsonObject { ["id"] = JsonNode.Parse( request.Id!.Value.GetRawText() ), ["result"] = null }, ct );
+		WriteServerAsync( new JsonObject { ["id"] = JsonNode.Parse( request.Id!.Value.GetRawText() ), ["result"] = null }, ct );
 
 	Task ShowMessageAsync( int type, string message, CancellationToken ct ) =>
 		client.WriteAsync( new JsonObject { ["method"] = "window/showMessage", ["params"] = new JsonObject { ["type"] = type, ["message"] = message } }, ct );

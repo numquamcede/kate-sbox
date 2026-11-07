@@ -9,6 +9,10 @@
 		<RootNamespace>RoslynKate</RootNamespace>
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<!-- Precompiled, so Kate's first request isn't waiting on the JIT -->
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+		<SelfContained>false</SelfContained>
+		<PublishReadyToRun>true</PublishReadyToRun>
 		<Version>0.1.0</Version>
 	</PropertyGroup>
 
