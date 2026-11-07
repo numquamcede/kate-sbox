@@ -7,7 +7,10 @@ param(
 	# Microsoft.CodeAnalysis.LanguageServer build to use; the same server VS Code's C# extension ships
 	[string] $RoslynVersion = '5.0.0-2.26521.8',
 	# s&box install folder; found from FACEPUNCH_ENGINE or Steam when not given
-	[string] $SboxPath
+	[string] $SboxPath,
+	# Folder of s&box projects whose C# colours get cached now, so Kate shows them from the first file
+	[string] $ProjectsPath = ( Join-Path ( [Environment]::GetFolderPath( 'MyDocuments' ) ) 's&box projects' ),
+	[switch] $SkipWarmUp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -171,5 +174,17 @@ Set-KConfig $katerc 'lspclient' @{
 }
 
 Set-KConfig "$data\kdeglobals" 'Icons' @{ Theme = 'CatePro' }
+
+# --- C# colours: cache them for each project now, rather than the first time Kate opens it -----------
+
+if ( -not $SkipWarmUp -and ( Test-Path $ProjectsPath ) )
+{
+	foreach ( $project in Get-ChildItem $ProjectsPath -Directory | Where-Object { Get-ChildItem $_.FullName -Filter *.sbproj } )
+	{
+		Write-Host "Caching C# colours for $( $project.Name )..."
+		& "$tools\roslyn-kate.exe" --warm $project.FullName
+		if ( $LASTEXITCODE -ne 0 ) { Write-Warning "Couldn't cache $( $project.Name ); Kate colours it the first time it's opened instead." }
+	}
+}
 
 Write-Host "kate-sbox installed. Start Kate, and pick Kate under Edit > Preferences > Code Editor in s&box."

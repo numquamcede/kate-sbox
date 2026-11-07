@@ -25,6 +25,14 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 	/// <summary>
 	/// Token types worth hovering to make Roslyn build a project's compilation; see <see cref="ForceCompilationAsync"/>.
 	/// </summary>
+	static readonly Dictionary<string, string> KateTokenTypes = new()
+	{
+		["recordClass"] = "class",
+		["recordStruct"] = "struct",
+		["delegate"] = "class",
+		["extensionMethod"] = "method",
+	};
+
 	static readonly HashSet<string> SymbolTokenTypes =
 	[
 		"namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property",
@@ -70,6 +78,7 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 
 	readonly Lock _writeLock = new();
 	Task? _serverWrites;
+	Task? _kateWrites;
 	int _nextId;
 	string? _rootPath;
 	string? _loadedName;
@@ -82,10 +91,56 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 	string? _initializeKey;
 
 	/// <summary>
+	/// Set when there's no Kate, only <see cref="WarmAsync"/> filling the cache.
+	/// </summary>
+	bool _warming;
+	string? _projectFolder;
+
+	/// <summary>
 	/// Identifies the token legend Kate is using, so cached tokens are only used with the legend they were made for.
 	/// </summary>
 	string? _legendKey;
 	string[] _tokenTypes = [];
+
+	/// <summary>
+	/// Without Kate: loads the project in <paramref name="folder"/>, caches the colours of every source
+	/// file in it, and shuts Roslyn down, so the first file Kate opens there is already coloured.
+	/// Initializes Roslyn the way Kate last did, so Kate gets the cached answer to that too.
+	/// </summary>
+	public async Task<int> WarmAsync( string folder, CancellationToken ct )
+	{
+		_warming = true;
+		_ = Guard( PumpServerToClientAsync( ct ) );
+
+		var parameters = cache.LoadClientParameters() ?? new JsonObject { ["capabilities"] = new JsonObject() };
+		parameters["processId"] = Environment.ProcessId;
+		parameters["rootUri"] = PathToUri( folder );
+		parameters["rootPath"] = folder;
+		parameters["workspaceFolders"] = new JsonArray( new JsonObject { ["uri"] = PathToUri( folder ), ["name"] = Path.GetFileName( folder ) } );
+		var body = System.Text.Encoding.UTF8.GetBytes( new JsonObject { ["jsonrpc"] = "2.0", ["id"] = 0, ["method"] = "initialize", ["params"] = parameters }.ToJsonString() );
+
+		CaptureRoot( body );
+		if ( !await TryInitializeFromCacheAsync( body, ct ) )
+		{
+			_initializeId = "0";
+			await ( await serverStarting ).WriteAsync( body, ct );
+		}
+
+		await _serverInitialized.Task.WaitAsync( ct );
+		await SendToServerAsync( "initialized", new JsonObject(), ct );
+		OpenWorkspace( ct );
+		await _workspaceReady.Task.WaitAsync( ct );
+
+		if ( _projectFolder is null )
+			return 1;
+
+		var sources = TokenCache.FindSources( _projectFolder ).ToList();
+		var stored = await CacheTokensAsync( _projectFolder, sources, ct );
+
+		await RequestFromServerAsync( "shutdown", new JsonObject(), ct );
+		await SendToServerAsync( "exit", new JsonObject(), ct );
+		return stored > 0 || sources.Count == 0 ? 0 : 1;
+	}
 
 	public async Task RunAsync( CancellationToken ct )
 	{
@@ -155,10 +210,12 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 					break;
 			}
 
-			var forwarded = WriteServerAsync( body, ct );
+			// Kate's answers to Roslyn's own requests (its settings, say) go straight through: Roslyn may need
+			// them to finish loading
+			var forwarded = info.IsResponse || info.Method is "initialized" or "shutdown" or "exit" ? WriteServerAsync( body, ct ) : ForwardFromKate( body, ct );
 
 			if ( info.Method == "initialized" )
-				_ = Guard( OpenWorkspaceAsync( ct ) );
+				OpenWorkspace( ct );
 
 			// Nothing useful comes after exit; returning lets Program wind the server down.
 			if ( info.Method == "exit" )
@@ -189,7 +246,15 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 			if ( info.IsResponse && _initializeId is not null && info.Id?.GetRawText() == _initializeId )
 			{
 				_initializeId = null;
-				OnServerInitialized( JsonNode.Parse( body )?["result"], answeredWith: null );
+				var response = JsonNode.Parse( body )!;
+				OnServerInitialized( response["result"], answeredWith: null );
+
+				if ( response["result"] is { } result )
+				{
+					response["result"] = ForKate( result );
+					await client.WriteAsync( response, ct );
+					continue;
+				}
 			}
 
 			if ( info.IsRequest && await HandleServerRequestAsync( info, body, ct ) )
@@ -268,6 +333,9 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 	{
 		var request = JsonNode.Parse( body )!;
 		var p = request["params"];
+		if ( !_warming && p is not null )
+			cache.SaveClientParameters( p );
+
 		_initializeKey = TokenCache.Key( serverKey, p?["capabilities"]?.ToJsonString(), p?["initializationOptions"]?.ToJsonString() );
 
 		var cached = cache.LoadInitializeResult( _initializeKey );
@@ -275,7 +343,7 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 			return false;
 
 		UseLegend( cached );
-		await client.WriteAsync( new JsonObject { ["id"] = request["id"]?.DeepClone(), ["result"] = cached.DeepClone() }, ct );
+		await client.WriteAsync( new JsonObject { ["id"] = request["id"]?.DeepClone(), ["result"] = ForKate( cached ) }, ct );
 
 		var id = IdPrefix + "initialize";
 		var answer = new TaskCompletionSource<JsonNode?>( TaskCreationOptions.RunContinuationsAsynchronously );
@@ -320,6 +388,26 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		}
 
 		_serverInitialized.TrySetResult();
+	}
+
+	/// <summary>
+	/// Roslyn's answer as Kate gets it. Kate only colours the standard token types, so records, delegates
+	/// and extension methods would stay uncoloured; they're named as the plain kinds instead, which gives
+	/// them the colours VS Code gives them.
+	/// </summary>
+	static JsonNode ForKate( JsonNode initializeResult )
+	{
+		var result = initializeResult.DeepClone();
+		if ( result["capabilities"]?["semanticTokensProvider"]?["legend"]?["tokenTypes"] is JsonArray types )
+		{
+			for ( var i = 0; i < types.Count; i++ )
+			{
+				if ( types[i]?.GetValue<string>() is { } name && KateTokenTypes.TryGetValue( name, out var plain ) )
+					types[i] = plain;
+			}
+		}
+
+		return result;
 	}
 
 	void UseLegend( JsonNode initializeResult )
@@ -386,7 +474,14 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		}
 	}
 
-	async Task CacheTokensAsync( string projectFolder, IReadOnlyCollection<string> paths, CancellationToken ct )
+	void StartCaching( string projectFolder, CancellationToken ct )
+	{
+		_projectFolder = projectFolder;
+		if ( !_warming )
+			_ = Guard( FillCacheAsync( projectFolder, ct ) );
+	}
+
+	async Task<int> CacheTokensAsync( string projectFolder, IReadOnlyCollection<string> paths, CancellationToken ct )
 	{
 		var stored = 0;
 
@@ -415,6 +510,7 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		}
 
 		log.Write( $"cached colours for {stored} of {paths.Count} files" );
+		return stored;
 	}
 
 	/// <summary>
@@ -532,7 +628,7 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 			log.Write( $"warm-up failed, forwarding anyway: {e.Message}" );
 		}
 
-		await WriteServerAsync( body, ct );
+		await ForwardFromKate( body, ct );
 	}
 
 	/// <summary>
@@ -548,6 +644,7 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		try
 		{
 			await _workspaceReady.Task.WaitAsync( timeout.Token );
+			await KateMessagesSent().WaitAsync( timeout.Token );
 			await PublishDiagnosticsAsync( uri, timeout.Token );
 		}
 		catch ( OperationCanceledException ) when ( !ct.IsCancellationRequested )
@@ -582,13 +679,13 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 
 		var languageId = _openDocuments.TryGetValue( uri, out var id ) ? id : "csharp";
 
-		_ = WriteServerAsync( new JsonObject
+		_ = ForwardFromKate( new JsonObject
 		{
 			["method"] = "textDocument/didClose",
 			["params"] = new JsonObject { ["textDocument"] = new JsonObject { ["uri"] = uri } },
 		}, ct );
 
-		_ = WriteServerAsync( new JsonObject
+		_ = ForwardFromKate( new JsonObject
 		{
 			["method"] = "textDocument/didOpen",
 			["params"] = new JsonObject
@@ -607,7 +704,7 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		var rest = changes.Skip( lastFull + 1 ).Select( c => c?.DeepClone() ).ToArray();
 		if ( rest.Length > 0 )
 		{
-			_ = WriteServerAsync( new JsonObject
+			_ = ForwardFromKate( new JsonObject
 			{
 				["method"] = "textDocument/didChange",
 				["params"] = new JsonObject
@@ -631,7 +728,11 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		log.Write( $"root: {_rootPath ?? "(none)"}" );
 	}
 
-	async Task OpenWorkspaceAsync( CancellationToken ct )
+	/// <summary>
+	/// Queues the solution (or projects) for Roslyn straight after <c>initialized</c>, before anything else
+	/// Kate sends: a file Kate opens before then is taken for a standalone file, outside the project.
+	/// </summary>
+	void OpenWorkspace( CancellationToken ct )
 	{
 		// Don't hold requests forever if loading hangs or never reports back.
 		_ = Task.Delay( TimeSpan.FromMinutes( 2 ), ct ).ContinueWith( _ => _workspaceReady.TrySetResult(), TaskScheduler.Default );
@@ -639,34 +740,34 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 		if ( _rootPath is null )
 		{
 			_workspaceReady.TrySetResult();
-			await ShowMessageAsync( 2, "C#: Kate didn't send a workspace root, so no project was loaded.", ct );
+			_ = Guard( ShowMessageAsync( 2, "C#: Kate didn't send a workspace root, so no project was loaded.", ct ) );
 			return;
 		}
 
 		var target = WorkspaceLocator.Find( _rootPath );
 
-		if ( target.Warning is not null )
-			await ShowMessageAsync( 2, $"C#: {target.Warning}", ct );
-
 		if ( target.Solution is not null )
 		{
 			_loadedName = Path.GetFileName( target.Solution );
 			log.Write( $"opening solution {target.Solution}" );
-			await SendToServerAsync( "solution/open", new JsonObject { ["solution"] = PathToUri( target.Solution ) }, ct );
-			_ = Guard( FillCacheAsync( Path.GetDirectoryName( target.Solution )!, ct ) );
+			_ = SendToServerAsync( "solution/open", new JsonObject { ["solution"] = PathToUri( target.Solution ) }, ct );
+			StartCaching( Path.GetDirectoryName( target.Solution )!, ct );
 		}
 		else if ( target.Projects.Count > 0 )
 		{
 			_loadedName = target.Projects.Count == 1 ? Path.GetFileName( target.Projects[0] ) : $"{target.Projects.Count} projects";
 			log.Write( $"opening projects {string.Join( ", ", target.Projects )}" );
 			var uris = new JsonArray( target.Projects.Select( p => (JsonNode)PathToUri( p ) ).ToArray() );
-			await SendToServerAsync( "project/open", new JsonObject { ["projects"] = uris }, ct );
-			_ = Guard( FillCacheAsync( _rootPath, ct ) );
+			_ = SendToServerAsync( "project/open", new JsonObject { ["projects"] = uris }, ct );
+			StartCaching( _rootPath, ct );
 		}
 		else
 		{
 			_workspaceReady.TrySetResult();
 		}
+
+		if ( target.Warning is not null )
+			_ = Guard( ShowMessageAsync( 2, $"C#: {target.Warning}", ct ) );
 	}
 
 	async Task RestoreAsync( string[] projectPaths, CancellationToken ct )
@@ -690,6 +791,8 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 
 	async Task RefreshDiagnosticsAsync( CancellationToken ct )
 	{
+		await KateMessagesSent();
+
 		foreach ( var uri in _openDocuments.Keys )
 			await PublishDiagnosticsAsync( uri, ct );
 	}
@@ -758,6 +861,30 @@ sealed class Bridge( LspChannel client, Task<LspChannel> serverStarting, Log log
 	{
 		lock ( _writeLock )
 			return _serverWrites = WriteAfterAsync( _serverWrites ?? _serverInitialized.Task, write );
+	}
+
+	/// <summary>
+	/// What Kate sends after <c>initialized</c> waits, in order, until Roslyn has loaded the project: Roslyn
+	/// takes a file opened while it's still loading for a standalone file outside the project, and keeps it
+	/// that way. Kate doesn't miss anything, since nothing Roslyn says before then is of use.
+	/// </summary>
+	Task ForwardFromKate( byte[] body, CancellationToken ct ) => QueueKateWrite( () => WriteServerAsync( body, ct ) );
+
+	Task ForwardFromKate( JsonNode message, CancellationToken ct ) => QueueKateWrite( () => WriteServerAsync( message, ct ) );
+
+	Task QueueKateWrite( Func<Task> write )
+	{
+		lock ( _writeLock )
+			return _kateWrites = WriteAfterAsync( _kateWrites ?? _workspaceReady.Task, write );
+	}
+
+	/// <summary>
+	/// Completes once everything Kate has sent so far has reached Roslyn, such as the files it opened.
+	/// </summary>
+	Task KateMessagesSent()
+	{
+		lock ( _writeLock )
+			return _kateWrites ?? Task.CompletedTask;
 	}
 
 	async Task WriteAfterAsync( Task previous, Func<Task> write )

@@ -7,6 +7,7 @@ namespace RoslynKate;
 /// behind a small bridge so it works with Kate, or any other plain LSP client.
 ///
 /// Usage: roslyn-kate [--server &lt;path&gt;] [--logLevel &lt;level&gt;] [--logDirectory &lt;dir&gt;] [-- extra server args]
+///        roslyn-kate --warm &lt;project folder&gt; [options]: cache the project's colours without Kate
 /// </summary>
 static class Program
 {
@@ -18,6 +19,7 @@ static class Program
 		var logLevel = "Information";
 		var logDirectory = Path.Combine( Environment.GetFolderPath( Environment.SpecialFolder.LocalApplicationData ), "kate-sbox", "logs" );
 		var extraArgs = new List<string>();
+		string? warmFolder = null;
 
 		for ( var i = 0; i < args.Length; i++ )
 		{
@@ -26,6 +28,7 @@ static class Program
 				case "--server" when i + 1 < args.Length: serverPath = args[++i]; break;
 				case "--logLevel" when i + 1 < args.Length: logLevel = args[++i]; break;
 				case "--logDirectory" when i + 1 < args.Length: logDirectory = args[++i]; break;
+				case "--warm" when i + 1 < args.Length: warmFolder = Path.GetFullPath( args[++i] ); break;
 				case "--": extraArgs.AddRange( args[(i + 1)..] ); i = args.Length; break;
 				case "--version": Console.WriteLine( typeof( Program ).Assembly.GetName().Version ); return 0;
 				default:
@@ -71,15 +74,19 @@ static class Program
 		var serverKey = $"{server.FullName}|{server.Length}|{server.LastWriteTimeUtc.Ticks}";
 
 		var bridge = new Bridge(
-			client: new LspChannel( Console.OpenStandardInput(), Console.OpenStandardOutput() ),
+			client: warmFolder is null ? new LspChannel( Console.OpenStandardInput(), Console.OpenStandardOutput() ) : new LspChannel( Stream.Null, Stream.Null ),
 			serverStarting: starting.ContinueWith( t => new LspChannel( t.Result.StandardOutput.BaseStream, t.Result.StandardInput.BaseStream ), TaskScheduler.Default ),
 			log,
 			TokenCache.Default(),
 			serverKey );
 
+		var result = 0;
 		try
 		{
-			await bridge.RunAsync( cts.Token );
+			if ( warmFolder is null )
+				await bridge.RunAsync( cts.Token );
+			else
+				result = await bridge.WarmAsync( warmFolder, cts.Token );
 		}
 		finally
 		{
@@ -88,7 +95,7 @@ static class Program
 		}
 
 		using var process = await starting;
-		return process.ExitCode;
+		return warmFolder is null ? process.ExitCode : result;
 	}
 
 	/// <summary>

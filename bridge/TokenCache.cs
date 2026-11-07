@@ -47,6 +47,24 @@ sealed class TokenCache( string directory )
 	}
 
 	/// <summary>
+	/// What Kate last sent in <c>initialize</c>, so a warm-up can initialize Roslyn the same way.
+	/// </summary>
+	public JsonNode? LoadClientParameters()
+	{
+		try
+		{
+			return JsonNode.Parse( File.ReadAllText( ClientPath ) );
+		}
+		catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException or JsonException )
+		{
+			return null;
+		}
+	}
+
+	public void SaveClientParameters( JsonNode parameters ) =>
+		WriteAtomically( ClientPath, stream => stream.Write( Encoding.UTF8.GetBytes( parameters.ToJsonString() ) ) );
+
+	/// <summary>
 	/// The file's tokens, if they were made from this text with this token legend.
 	/// </summary>
 	public int[]? LoadTokens( string path, string legendKey, string textHash )
@@ -159,6 +177,8 @@ sealed class TokenCache( string directory )
 
 	// One per key, so two Kate builds sharing the cache don't keep replacing each other's
 	string InitializePath( string key ) => Path.Combine( directory, $"initialize-{key[..16]}.json" );
+
+	string ClientPath => Path.Combine( directory, "client.json" );
 
 	string TokensPath( string path ) =>
 		Path.Combine( directory, "tokens", Hash( Path.GetFullPath( path ).ToLowerInvariant() )[..32] + ".bin" );

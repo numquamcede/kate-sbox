@@ -5,6 +5,7 @@ Use [Kate](https://kate-editor.org) as your [s&box](https://sbox.game) code edit
 - **C# IntelliSense** from the Roslyn language server, the same engine VS Code's C# Dev Kit runs on: completion, hover docs, go to definition (into decompiled engine code too), errors and warnings, semantic highlighting, inlay hints, rename, code actions and formatting. It loads the `.slnx` s&box generates, including the engine's editor projects.
 - **Kate in s&box**: a **Kate** entry under *Edit › Preferences › Code Editor*, so double-clicking a component or a compile error opens Kate at the right line.
 - **s&box file types**: highlighting for `.shader`/`.hlsl` (the `HEADER`/`MODES`/`VS`/`PS`/`CS` blocks, annotations, semantics) and `.razor` UI components.
+- **C# colours from the first moment**: Kate's C# highlighting is extended to colour types, namespaces and parameters where the code alone settles what they are, plus s&box's own type names, so a file looks the same before Roslyn has loaded as after.
 - **Cate Pro**: a dark editor theme with warm accent colours, a matching window colour scheme, and file icons in the same style.
 
 ## Requirements
@@ -24,9 +25,9 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 Then in the s&box editor pick **Edit › Preferences › Code Editor › Kate**.
 
-The installer builds the bridge, downloads the Roslyn server from Microsoft's package feed, adds the Kate option to s&box, and sets Kate up (theme, colours, icons, highlighting, LSP config). It keeps your other Kate settings, and is safe to run again; rerun it after an s&box update, which can remove the Kate option.
+The installer builds the bridge, downloads the Roslyn server from Microsoft's package feed, adds the Kate option to s&box, and sets Kate up (theme, colours, icons, highlighting, LSP config). Last, it has Roslyn colour the C# in each project under `Documents\s&box projects` (about 15 seconds a project; `-SkipWarmUp` skips it, `-ProjectsPath` points it elsewhere). It keeps your other Kate settings, and is safe to run again; rerun it after an s&box update, which can remove the Kate option.
 
-Open a project by opening its folder in Kate (or *Open Solution* in s&box). The first time, C# needs a few seconds to load; Kate shows "IntelliSense is ready" when it has. After that, files open with their full colours straight away, even before the project has loaded.
+Open a project by opening its folder in Kate (or *Open Solution* in s&box). C# needs a few seconds to load; Kate shows "IntelliSense is ready" when it has. Files show their full colours straight away, before that.
 
 ## How the C# support works
 
@@ -42,8 +43,9 @@ C# Dev Kit itself is licensed for Microsoft's editors only, but the language ser
 
 Roslyn can only colour types and parameters once it has loaded the project, which takes several seconds, and Kate keeps whatever colours it gets first. So `roslyn-kate` also remembers what Roslyn said, in `%LOCALAPPDATA%\kate-sbox\cache`:
 
-- After a project loads, it has Roslyn colour every `.cs` file in it, and again whenever one is saved or changes on disk. When Kate opens a file whose text matches, it gets those colours at once.
-- It answers Kate's `initialize` with Roslyn's answer from last time, so Kate can ask for colours while Roslyn is still starting.
+- After a project loads, it has Roslyn colour every `.cs` file in it, and again whenever one is saved or changes on disk. When Kate opens a file whose text matches, it gets those colours at once. `roslyn-kate --warm <project folder>` does the same without Kate; the installer runs it.
+- It answers Kate's `initialize` with Roslyn's answer from last time, so Kate can ask for colours while Roslyn is still starting. Everything else Kate sends waits until the project has loaded: a file opened before then is taken by Roslyn for a standalone file, outside the project.
+- It names records, delegates and extension methods to Kate as plain classes and methods, which Kate otherwise leaves uncoloured.
 
 It also ties the server's lifetime to its own, so restarting the server in Kate never leaves a Roslyn process behind.
 
@@ -57,6 +59,7 @@ It also ties the server's lifetime to its own, so restarting the server in Kate 
 | `colors/CatePro.colors` | Kate window colour scheme |
 | `icons/build-icons.ps1` | Generates the Cate Pro file icon theme |
 | `syntax/hlsl.xml`, `syntax/razor.xml` | Highlighting for shaders and Razor |
+| `syntax/csharp.xml` | Kate's C# highlighting, extended; replaces the built-in one |
 | `mime/kate-sbox.xml` | File types for `.razor`, `.shader`, `.csproj`, `.slnx`, `.sbproj`, `.scene`, `.prefab` so they get icons |
 | `install.ps1` | Installs all of the above |
 
